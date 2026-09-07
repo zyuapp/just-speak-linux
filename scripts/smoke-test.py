@@ -165,6 +165,13 @@ def smoke(binary, model, root):
     def count(kind):
         return sum(event["event"] == kind for event in read_jsonl(root / "events.jsonl"))
 
+    def start_ready():
+        previous = count("recording_started")
+        cli("start")
+        # The service acknowledges Start before its asynchronous recorder has
+        # copied the fixture. Stop-before-ready tests cancellation, not inference.
+        wait_for(lambda: count("recording_started") > previous, "synthetic audio readiness")
+
     def clean_recordings():
         return not list((root / "tmp").glob("just-speak-recording-*"))
 
@@ -222,10 +229,9 @@ def smoke(binary, model, root):
             print("PASS cancellation/status survive invalid edited config; idle stop/cancel are harmless", flush=True)
 
             (root / "fixture-path").write_text(str(long_fixture))
-            cli("start")
+            start_ready()
             cli("stop")
-            time.sleep(0.1)
-            assert status()["phase"] == "transcribing"
+            wait_for(lambda: status()["phase"] == "transcribing", "long-fixture transcription")
             cli("cancel")
             assert idle()
             wait_for(clean_recordings, "canceled inference to release its audio")
@@ -235,7 +241,7 @@ def smoke(binary, model, root):
 
             gate = root / "hold-clipboard"
             gate.touch()
-            cli("start")
+            start_ready()
             cli("stop")
             wait_for(lambda: count("copy_started") == 2, "delayed clipboard handshake")
             started = time.monotonic()
@@ -274,7 +280,7 @@ def smoke(binary, model, root):
             cli("settings", "set", "mute_while_recording", "false")
             print("PASS capture precedes stalled sound; mute, stop, cancellation, and cleanup survive timeout", flush=True)
 
-            cli("start")
+            start_ready()
             assert status()["phase"] == "recording"
             daemon.send_signal(signal.SIGTERM)
             assert daemon.wait(timeout=15) == 0
