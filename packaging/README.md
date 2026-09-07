@@ -28,10 +28,10 @@ from a terminal in that session before starting the service:
 systemctl --user import-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE
 ```
 
-## Hold F9 to speak
+## Hold F10 to speak
 
 Review `hyprland.lua`, then add its contents to `~/.config/hypr/bindings.lua`.
-It overrides **Omarchy's existing voxtype F9 binding**. Press starts recording;
+It assigns **F10 to JustSpeak and leaves Voxtype on F9**. Press starts recording;
 release transcribes and pastes. Escape cancels and still reaches the application,
 including while recording; idle cancellation is a no-op. Escape uses Hyprland's
 [`non_consuming` flag](https://wiki.hypr.land/configuring/core/binds/flags/).
@@ -97,7 +97,7 @@ that upstream native download. Installed binaries use the linked static runtime.
 Disable the widget with `omarchy plugin disable local.just-speak` and remove its
 directory from `~/.config/omarchy/plugins`. Disable services with `systemctl --user
 disable --now just-speak-overlay.service just-speak.service`. Remove the added
-hotkey block (Omarchy's default voxtype F9 bindings return on reload), then run
+JustSpeak hotkey block, then run
 `hyprctl reload` and `hyprctl configerrors`.
 
 For a local install, remove only the installed `bin/just-speak`,

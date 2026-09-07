@@ -17,7 +17,7 @@ Scope {
         if (phase === "loading") return "Loading speech model…";
         if (phase === "error") return "JustSpeak needs attention";
         if (phase === "disconnected") return "JustSpeak is offline";
-        return modelReady ? "Ready · hold F9 to speak" : "Speech model not ready";
+        return modelReady ? "Ready · hold F10 to speak" : "Speech model not ready";
     }
 
     function update(line: string): void {

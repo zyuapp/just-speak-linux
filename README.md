@@ -1,6 +1,6 @@
 # JustSpeak for Linux
 
-Local push-to-talk dictation for **Omarchy 4 / Hyprland 0.56**. Hold F9, speak,
+Local push-to-talk dictation for **Omarchy 4 / Hyprland 0.56**. Hold F10, speak,
 release to transcribe and paste. Escape cancels. The model stays in memory in a
 small Rust service; Quickshell provides an optional bar control and recording
 indicator that never takes keyboard focus.
@@ -62,10 +62,10 @@ The installed service uses the default XDG model directory. To reuse the model
 downloaded by `make model`, set its **absolute** path as `model_dir` in the config
 below instead of downloading again.
 
-See [desktop integration](packaging/README.md) for the F9/Escape binding snippet,
+See [desktop integration](packaging/README.md) for the F10/Escape binding snippet,
 Omarchy bar widget, optional standalone overlay, Arch package, and removal steps.
-**F9 already belongs to Voxtype in Omarchy when Voxtype is installed**; the
-provided binding snippet explicitly replaces it. The installer only copies app
+**F10 controls JustSpeak; F9 remains assigned to Voxtype.** Check for custom
+F10 bindings before applying the snippet. The installer only copies app
 files and user service units. It does not change your hotkeys, start services,
 or enable a bar widget.
 
