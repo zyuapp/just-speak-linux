@@ -14,6 +14,22 @@ use tempfile::TempDir;
 pub struct Recorder {
     child: Option<Child>,
     directory: Option<TempDir>,
+    _parent: Option<SpawnParent>,
+}
+
+// Linux parent-death signals follow the *spawning thread*. Keep that thread
+// alive while the recorder moves between startup, event-loop and finish workers.
+struct SpawnParent {
+    release: Option<std::sync::mpsc::Sender<()>>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+impl Drop for SpawnParent {
+    fn drop(&mut self) {
+        self.release.take();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 /// The temporary WAV remains available until this value is dropped.
@@ -81,12 +97,24 @@ impl Recorder {
                 Ok(())
             });
         }
-        let child = command
-            .spawn()
+        let (created, child_ready) = std::sync::mpsc::sync_channel(1);
+        let (release, lifetime) = std::sync::mpsc::channel();
+        let spawning = thread::spawn(move || {
+            let _ = created.send(command.spawn());
+            let _ = lifetime.recv();
+        });
+        let parent = SpawnParent {
+            release: Some(release),
+            thread: Some(spawning),
+        };
+        let child = child_ready
+            .recv()
+            .context("recorder spawn thread stopped")?
             .context("start pw-record (install PipeWire's audio tools)")?;
         let mut recorder = Self {
             child: Some(child),
             directory: Some(directory),
+            _parent: Some(parent),
         };
         // Catch common startup failures without adding substantial hotkey latency.
         thread::sleep(Duration::from_millis(40));
@@ -318,6 +346,7 @@ mod tests {
         drop(Recorder {
             child: Some(child),
             directory: Some(directory),
+            _parent: None,
         });
         assert!(!path.exists());
         // SAFETY: signal 0 only tests process existence; it sends no signal.
@@ -337,6 +366,7 @@ mod tests {
         let recording = Recorder {
             child: Some(child),
             directory: Some(directory),
+            _parent: None,
         }
         .finish()
         .unwrap();
@@ -365,6 +395,7 @@ mod tests {
         Recorder {
             child: Some(child),
             directory: Some(directory),
+            _parent: None,
         }
     }
 
@@ -395,6 +426,7 @@ mod tests {
         let recorder = Recorder {
             child: Some(child),
             directory: Some(directory),
+            _parent: None,
         };
         assert!(recorder.finish().is_err());
     }

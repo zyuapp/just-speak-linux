@@ -1,0 +1,88 @@
+name: Build Linux release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+# Builds reviewable artifacts. Publishing a GitHub release is an explicit
+# maintainer step after downloading and testing this exact artifact.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux-x86_64:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      SHERPA_ONNX_LIB_DIR: ${{ github.workspace }}/native/lib
+      JUST_SPEAK_TEST_MODEL_DIR: ${{ runner.temp }}/just-speak-model
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential cmake curl python3 binutils lua5.4
+          rustup toolchain install 1.88.0 --profile minimal --component clippy,rustfmt
+          rustup default 1.88.0
+      - name: Check source
+        run: |
+          cargo fmt --all --check
+          for script in scripts/*.sh; do bash -n "$script"; done
+          python3 -m py_compile scripts/collect-licenses.py
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            python3 - <<'PY'
+          import os, re
+          version = re.search(r'^version\s*=\s*"([^"]+)"', open('Cargo.toml').read(), re.M).group(1)
+          assert os.environ['GITHUB_REF_NAME'] == 'v' + version, 'Tag and Cargo.toml versions differ'
+          PY
+          fi
+      - name: Build recognition-only native runtime
+        run: scripts/build-runtime.sh "$GITHUB_WORKSPACE/native"
+      - name: Test Rust and build release
+        run: |
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo build --release --locked
+      - name: Verify Ubuntu 22.04 ABI baseline
+        run: |
+          python3 - <<'PY'
+          import re, subprocess
+          symbols = subprocess.check_output(['objdump', '-T', 'target/release/just-speak'], text=True)
+          for prefix, maximum in [('GLIBC_', (2, 35)), ('GLIBCXX_', (3, 4, 30))]:
+              found = [tuple(map(int, v.split('.'))) for v in re.findall(re.escape(prefix) + r'([0-9.]+)', symbols)]
+              assert found and max(found) <= maximum, f'{prefix} ABI exceeds Ubuntu 22.04 baseline: {max(found) if found else "missing"}'
+              print(prefix, '.'.join(map(str, max(found))))
+          PY
+          ldd target/release/just-speak
+      - name: Exercise real model with the public binary
+        run: |
+          scripts/download-model.sh "$JUST_SPEAK_TEST_MODEL_DIR"
+          cargo test --locked real_model_recognizes_fixture_and_reuses_engine -- --ignored
+          python3 scripts/smoke-test.py --binary target/release/just-speak --model-dir "$JUST_SPEAK_TEST_MODEL_DIR"
+          target/release/just-speak --model-dir "$JUST_SPEAK_TEST_MODEL_DIR" transcribe "$JUST_SPEAK_TEST_MODEL_DIR/test_wavs/0.wav" > "$RUNNER_TEMP/transcript.txt"
+          python3 - <<'PY'
+          import os, pathlib
+          transcript = pathlib.Path(os.environ['RUNNER_TEMP'], 'transcript.txt').read_text().lower()
+          assert 'old portrait' in transcript, transcript
+          assert '<unk>' not in transcript, transcript
+          print('Release binary recognized the official speech fixture.')
+          PY
+      - name: Package verified binary, interfaces, source and notices
+        run: scripts/create-release.sh "$GITHUB_WORKSPACE/dist"
+      - name: Retain release artifacts for review and publication
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: just-speak-linux-release-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

@@ -5,30 +5,36 @@ import Quickshell.Io
 Scope {
     id: root
 
-    readonly property string executable: Quickshell.env("JUST_SPEAK_BIN") || "just-speak"
+    readonly property string overrideExecutable: Quickshell.env("JUST_SPEAK_BIN") || ""
+    readonly property string localExecutable: Quickshell.env("HOME") + "/.local/bin/just-speak"
+    property string executable: overrideExecutable || "just-speak"
+    property bool executableReady: overrideExecutable !== ""
     property string phase: "disconnected"
     property string message: "Start the JustSpeak service to connect."
     property real elapsedSeconds: 0
     property bool modelReady: false
     property bool canCancel: false
+    property string shortcut: "F10"
     readonly property string label: {
         if (phase === "recording") return "Listening · " + Math.floor(elapsedSeconds) + "s";
         if (phase === "transcribing") return "Transcribing…";
         if (phase === "loading") return "Loading speech model…";
+        if (phase === "updating") return message || "Updating JustSpeak…";
         if (phase === "error") return "JustSpeak needs attention";
         if (phase === "disconnected") return "JustSpeak is offline";
-        return modelReady ? "Ready · hold F10 to speak" : "Speech model not ready";
+        return modelReady ? "Ready · hold " + shortcut + " to speak" : "Speech model not ready";
     }
 
     function update(line: string): void {
         try {
             const state = JSON.parse(line);
-            if (!["loading", "idle", "recording", "transcribing", "error"].includes(state.phase))
+            if (!["loading", "idle", "recording", "transcribing", "error", "updating"].includes(state.phase))
                 return;
             message = typeof state.message === "string" ? state.message : "";
             elapsedSeconds = typeof state.elapsed_seconds === "number" ? Math.max(0, state.elapsed_seconds) : 0;
             modelReady = state.model_ready === true;
             canCancel = state.can_cancel === true || state.phase === "recording" || state.phase === "transcribing";
+            if (typeof state.shortcut === "string" && state.shortcut.length > 0) shortcut = state.shortcut;
             phase = state.phase;
         } catch (error) {
             console.warn("JustSpeak: ignored malformed status event");
@@ -40,9 +46,18 @@ Scope {
     }
 
     Process {
+        command: ["/usr/bin/test", "-x", root.localExecutable]
+        running: !root.executableReady
+        onExited: exitCode => {
+            root.executable = exitCode === 0 ? root.localExecutable : "just-speak";
+            root.executableReady = true;
+        }
+    }
+
+    Process {
         id: watcher
         command: [root.executable, "watch"]
-        running: true
+        running: root.executableReady
         stdout: SplitParser {
             onRead: data => root.update(data)
         }
@@ -62,7 +77,7 @@ Scope {
     Timer {
         interval: 2000
         repeat: true
-        running: !watcher.running
+        running: root.executableReady && !watcher.running
         onTriggered: watcher.running = true
     }
 }

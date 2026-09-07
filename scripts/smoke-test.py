@@ -35,8 +35,8 @@ if name == "pw-record":
         assert args[args.index(option) + 1] == value
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
     shutil.copyfile((root / "fixture-path").read_text(), args[-1])
-    event("recording_started")
     try:
+        event("recording_started")
         while True:
             signal.pause()
     finally:
@@ -94,7 +94,7 @@ def stop_process(process):
 def smoke(binary, model, root):
     fixture = model / "test_wavs/0.wav"
     assert fixture.is_file(), f"missing speech fixture: {fixture}"
-    for directory in ["bin", "config/just-speak", "runtime", "data", "cache", "tmp"]:
+    for directory in ["bin", "config/just-speak", "runtime", "data", "cache", "tmp", "state"]:
         (root / directory).mkdir(parents=True, mode=0o700)
     for program in ["pw-record", "wl-copy", "hyprctl"]:
         helper = root / "bin" / program
@@ -112,14 +112,15 @@ def smoke(binary, model, root):
         output.setparams(params)
         output.writeframes(frames * repetitions)
     (root / "config/just-speak/config.toml").write_text(
-        f"model_dir = {json.dumps(str(model))}\nnum_threads = 4\npaste = true\n"
+        f"model_dir = {json.dumps(str(model))}\nnum_threads = 4\npaste = true\nsound_feedback = false\nmute_while_recording = false\n"
     )
     environment = dict(os.environ, PATH=str(root / "bin"), TMPDIR=str(root / "tmp"),
                        XDG_CONFIG_HOME=str(root / "config"), XDG_RUNTIME_DIR=str(root / "runtime"),
                        XDG_DATA_HOME=str(root / "data"), XDG_CACHE_HOME=str(root / "cache"),
-                       JUST_SPEAK_SMOKE_ROOT=str(root))
+                       XDG_STATE_HOME=str(root / "state"), JUST_SPEAK_SMOKE_ROOT=str(root))
     for name in ["WAYLAND_DISPLAY", "DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE"]:
         environment.pop(name, None)
+    environment["HYPRLAND_INSTANCE_SIGNATURE"] = "synthetic-only"
     socket = root / "runtime/just-speak/control.sock"
     daemon_log, watch_log = root / "daemon.log", root / "watch.jsonl"
     daemon = watcher = None
@@ -164,13 +165,26 @@ def smoke(binary, model, root):
             cli("start")
             cli("start")
             assert status()["phase"] == "recording"
+            wait_for(lambda: count("recording_started") == 1, "asynchronous recorder startup")
             assert count("recording_started") == 1, "duplicate start created a second recorder"
+            time.sleep(0.12)
+            assert count("recording_stopped") == 0, "recorder died when its startup worker exited"
             cli("stop")
             wait_for(idle, "first dictation delivery")
             assert count("dispatch") == 1
             assert "old portrait" in (root / "clipboard.txt").read_text().lower()
             wait_for(clean_recordings, "finished audio cleanup")
             print("PASS recording → real transcription → clipboard → simulated paste", flush=True)
+
+            menu = json.loads(cli("menu", "--json").stdout)
+            assert len(menu["history"]) == 1 and menu["settings"]["shortcut"] == "F10"
+            assert menu["desktop"]["automatic_paste"] is True
+            cli("settings", "set", "sound_feedback", "false")
+            assert "model_dir" in (root / "config/just-speak/config.toml").read_text()
+            assert cli("settings", "set", "unknown", "true", check=False).returncode != 0
+            history_file = root / "state/just-speak/history.json"
+            assert history_file.stat().st_mode & 0o777 == 0o600
+            print("PASS menu snapshot, private history, and validated persistent preferences", flush=True)
 
             cli("start")
             settings = root / "config/just-speak/config.toml"
@@ -182,6 +196,7 @@ def smoke(binary, model, root):
             wait_for(idle, "recording cancellation")
             settings.write_text(valid_settings)
             wait_for(clean_recordings, "canceled audio cleanup")
+            time.sleep(0.1)
             assert count("dispatch") == 1 and count("copy_started") == 1
             print("PASS cancellation/status survive invalid edited config; idle stop/cancel are harmless", flush=True)
 
@@ -218,7 +233,7 @@ def smoke(binary, model, root):
             daemon.send_signal(signal.SIGTERM)
             assert daemon.wait(timeout=15) == 0
             assert not socket.exists() and clean_recordings(), "shutdown left socket or audio behind"
-            assert count("recording_started") == count("recording_stopped")
+            assert count("recording_started") == count("recording_stopped"), read_jsonl(root / "events.jsonl")
             phases = [entry["phase"] for entry in read_jsonl(watch_log)]
             expected = iter(["loading", "idle", "recording", "transcribing", "idle"])
             next_phase = next(expected)

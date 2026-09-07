@@ -2,8 +2,12 @@ use crate::{
     audio::{Recorder, Recording},
     config::{Config, socket_path},
     desktop::{self, PasteTarget},
+    feedback::Feedback,
+    history::History,
     inference::Engine,
+    inputs,
     protocol::{self, Phase, Request, Response, Status},
+    shortcut,
 };
 use anyhow::{Context, Result, bail, ensure};
 use fs2::FileExt;
@@ -28,7 +32,10 @@ enum Event {
     Request(Request, Sender<Response>),
     Watch(SyncSender<Status>),
     Loaded(Result<()>),
-    Recorded(u64, Result<Recording>),
+    Prepared(u64, Result<(Recorder, Option<PasteTarget>)>, Feedback),
+    Recorded(u64, Result<Recording>, Feedback),
+    FeedbackReady(Feedback),
+    Preferences(Result<Config>, Sender<Response>),
     Transcribed(u64, Result<String>),
     Delivered(u64, Result<bool>),
 }
@@ -73,11 +80,17 @@ struct Service {
     worker: Sender<Work>,
     watchers: Vec<SyncSender<Status>>,
     helpers: Vec<thread::JoinHandle<()>>,
+    history: History,
+    feedback: Option<Feedback>,
+    stop_pending: bool,
+    shutdown: Arc<AtomicBool>,
+    delivered_text: Option<String>,
 }
 
 impl Service {
     fn snapshot(&self) -> Status {
         let mut status = self.status.clone();
+        status.shortcut = self.config.shortcut.clone();
         if status.phase == Phase::Recording {
             status.elapsed_seconds = self.started.map(|start| start.elapsed().as_secs_f64());
         }
@@ -97,6 +110,7 @@ impl Service {
         self.status.elapsed_seconds = None;
         self.status.can_cancel = false;
         self.started = None;
+        self.delivered_text = None;
         self.target = None;
         self.generation.cancel();
         self.current_generation.store(0, Ordering::Release);
@@ -117,19 +131,40 @@ impl Service {
             "speech model is not ready; check `just-speak status`"
         );
         ensure!(
-            self.status.phase != Phase::Transcribing,
+            matches!(self.status.phase, Phase::Idle | Phase::Error),
             "transcription is still running; cancel it before starting again"
         );
-        let target = if self.config.paste {
-            Some(desktop::capture_target()?)
-        } else {
-            None
-        };
-        let recorder = Recorder::start(self.config.input.as_deref())?;
+        let mut feedback = self
+            .feedback
+            .take()
+            .context("Microphone is still stopping; try again in a moment")?;
         let id = self.generation.begin();
         self.current_generation.store(id, Ordering::Release);
-        self.recorder = Some(recorder);
-        self.target = target;
+        let events = self.events.clone();
+        let config = self.config.clone();
+        let current = self.current_generation.clone();
+        self.stop_pending = false;
+        self.helpers.push(thread::spawn(move || {
+            let result = (|| {
+                let target = if config.paste {
+                    desktop::capture_target()?
+                } else {
+                    None
+                };
+                if let Some(input) = &config.input {
+                    inputs::validate_selected(input)?;
+                }
+                if let Err(error) =
+                    feedback.begin(config.sound_feedback, config.mute_while_recording)
+                {
+                    eprintln!("JustSpeak: optional recording feedback unavailable: {error:#}");
+                    let _ = feedback.end(false);
+                }
+                ensure!(current.load(Ordering::Acquire) == id, "recording canceled");
+                Ok((Recorder::start(config.input.as_deref())?, target))
+            })();
+            let _ = events.send(Event::Prepared(id, result, feedback));
+        }));
         self.started = Some(Instant::now());
         self.status.phase = Phase::Recording;
         self.status.message = None;
@@ -140,6 +175,12 @@ impl Service {
 
     fn stop(&mut self) {
         let Some(recorder) = self.recorder.take() else {
+            if self.status.phase == Phase::Recording {
+                self.stop_pending = true;
+            }
+            return;
+        };
+        let Some(mut feedback) = self.feedback.take() else {
             return;
         };
         let Some(id) = self.generation.active else {
@@ -150,8 +191,13 @@ impl Service {
         self.status.message = Some("Transcribing locally".into());
         let events = self.events.clone();
         // Finalizing the WAV is bounded, but must not delay Escape or status commands.
+        let sound = self.config.sound_feedback;
         self.helpers.push(thread::spawn(move || {
-            let _ = events.send(Event::Recorded(id, recorder.finish()));
+            let result = recorder.finish();
+            if let Err(error) = feedback.end(sound) {
+                eprintln!("JustSpeak: restoring audio: {error:#}");
+            }
+            let _ = events.send(Event::Recorded(id, result, feedback));
         }));
     }
 
@@ -161,24 +207,111 @@ impl Service {
         }
         self.idle(Some("Canceled".into()));
         if let Some(recorder) = self.recorder.take() {
-            self.helpers.push(thread::spawn(move || drop(recorder)));
+            let feedback = self.feedback.take();
+            let events = self.events.clone();
+            self.helpers.push(thread::spawn(move || {
+                drop(recorder);
+                if let Some(mut feedback) = feedback {
+                    let _ = feedback.end(false);
+                    let _ = events.send(Event::FeedbackReady(feedback));
+                }
+            }));
         }
     }
 
+    fn require_idle(&self) -> Result<()> {
+        ensure!(
+            matches!(self.status.phase, Phase::Idle | Phase::Error),
+            "Finish or cancel dictation before changing settings"
+        );
+        ensure!(
+            self.feedback.is_some(),
+            "Microphone is still stopping; try again in a moment"
+        );
+        Ok(())
+    }
+
     fn command(&mut self, request: Request) -> Result<()> {
+        let paste_history = matches!(&request, Request::HistoryPaste { .. });
         match request {
-            Request::Start => {
+            Request::Start {} => {
                 if let Err(error) = self.start() {
                     // A busy/not-ready response must preserve the running operation.
-                    if self.status.model_ready && !self.status.can_cancel {
+                    if self.status.model_ready
+                        && !self.status.can_cancel
+                        && self.status.phase != Phase::Updating
+                    {
                         self.fail(format!("{error:#}"));
                     }
                     return Err(error);
                 }
             }
-            Request::Stop => self.stop(),
-            Request::Cancel => self.cancel(),
-            Request::Status | Request::Watch => {}
+            Request::Stop {} => self.stop(),
+            Request::Cancel {} => self.cancel(),
+            Request::Status {} | Request::Watch {} | Request::Menu {} => {}
+            Request::SetInput { input } => {
+                self.require_idle()?;
+                if let Some(id) = &input {
+                    inputs::validate_selected(id)?;
+                }
+                let mut config = self.config.clone();
+                config.input = input;
+                config.save_preference("input")?;
+                self.config = config;
+            }
+            Request::SetOption { key, value } => {
+                self.require_idle()?;
+                let mut config = self.config.clone();
+                match key.as_str() {
+                    "paste" => config.paste = value,
+                    "sound_feedback" => config.sound_feedback = value,
+                    "mute_while_recording" => config.mute_while_recording = value,
+                    "history_enabled" => config.history_enabled = value,
+                    "auto_check_updates" => config.auto_check_updates = value,
+                    _ => bail!("unknown preference"),
+                }
+                config.save_preference(&key)?;
+                self.config = config;
+            }
+            Request::SetShortcut { .. } => unreachable!("shortcut is applied by a settings worker"),
+            Request::HistoryClear {} => {
+                self.require_idle()?;
+                self.history.clear()?;
+            }
+            Request::HistoryCopy { id } | Request::HistoryPaste { id } => {
+                self.require_idle()?;
+                let text = self
+                    .history
+                    .get(&id)
+                    .context("transcript no longer in history")?
+                    .text
+                    .clone();
+                let target = if paste_history {
+                    desktop::capture_target()?
+                } else {
+                    None
+                };
+                let id = self.generation.begin();
+                self.current_generation.store(id, Ordering::Release);
+                self.target = target;
+                self.status.phase = Phase::Transcribing;
+                self.status.can_cancel = true;
+                self.deliver(id, text);
+            }
+            Request::Quit {} => {
+                self.require_idle()?;
+                self.shutdown.store(true, Ordering::Relaxed);
+            }
+            Request::BeginUpdate {} => {
+                self.require_idle()?;
+                self.status.phase = Phase::Updating;
+                self.status.message = Some("Installing update".into());
+            }
+            Request::EndUpdate {} => {
+                if self.status.phase == Phase::Updating {
+                    self.idle(None);
+                }
+            }
         }
         Ok(())
     }
@@ -190,37 +323,108 @@ impl Service {
         match result {
             Ok(text) if text.trim().is_empty() => self.idle(Some("No speech detected".into())),
             Ok(text) => {
-                let target = self.target.clone();
-                let current = self.current_generation.clone();
-                let events = self.events.clone();
-                self.status.message = Some("Delivering transcript".into());
-                self.helpers.push(thread::spawn(move || {
-                    let result = match target {
-                        Some(target) => desktop::paste_if_current(&text, &target, &current, id),
-                        None if current.load(Ordering::Acquire) == id => {
-                            desktop::copy(&text).map(|()| true)
-                        }
-                        None => Ok(false),
-                    };
-                    let _ = events.send(Event::Delivered(id, result));
-                }));
+                self.delivered_text = Some(text.clone());
+                self.deliver(id, text);
             }
             Err(error) => self.fail(format!("Transcription failed: {error:#}")),
         }
     }
 
+    fn deliver(&mut self, id: u64, text: String) {
+        let target = self.target.clone();
+        let current = self.current_generation.clone();
+        let events = self.events.clone();
+        self.status.message = Some("Delivering transcript".into());
+        self.helpers.push(thread::spawn(move || {
+            let result = match target {
+                Some(target) => desktop::paste_if_current(&text, &target, &current, id),
+                None if current.load(Ordering::Acquire) == id => {
+                    desktop::copy(&text).map(|()| true)
+                }
+                None => Ok(false),
+            };
+            let _ = events.send(Event::Delivered(id, result));
+        }));
+    }
+
     fn handle(&mut self, event: Event) {
         match event {
             Event::Request(request, reply) => {
+                if matches!(&request, Request::Menu {}) {
+                    let status = self.snapshot();
+                    let settings = self.config.clone();
+                    let history = self.history.entries().to_vec();
+                    self.helpers.push(thread::spawn(move || {
+                        let (inputs, input_error) = match inputs::list() {
+                            Ok(inputs) => (inputs, None), Err(error) => (Vec::new(), Some(format!("{error:#}"))),
+                        };
+                        let data = serde_json::json!({"version": env!("CARGO_PKG_VERSION"), "settings": settings, "history": history, "inputs": inputs, "input_error": input_error, "desktop": desktop::capabilities()});
+                        let _ = reply.send(Response { ok: true, error: None, status, data: Some(data) });
+                    }));
+                    return;
+                }
+                if let Request::SetShortcut { shortcut: value } = &request {
+                    let validation = self.require_idle().and_then(|()| {
+                        ensure!(desktop::capabilities().shortcut_editing, "Shortcut editing requires Hyprland Lua; use your desktop's shortcut settings");
+                        shortcut::normalize(value)
+                    });
+                    match validation {
+                        Err(error) => {
+                            let _ = reply.send(Response {
+                                ok: false,
+                                error: Some(format!("{error:#}")),
+                                status: self.snapshot(),
+                                data: None,
+                            });
+                        }
+                        Ok(value) => {
+                            let mut config = self.config.clone();
+                            config.shortcut = value;
+                            let events = self.events.clone();
+                            self.status.phase = Phase::Updating;
+                            self.status.message = Some("Saving shortcut".into());
+                            self.broadcast();
+                            self.helpers.push(thread::spawn(move || {
+                                let result = (|| {
+                                    let change = shortcut::apply(&config.shortcut)?;
+                                    config.save_preference("shortcut")?;
+                                    change.commit();
+                                    Ok(config)
+                                })();
+                                let _ = events.send(Event::Preferences(result, reply));
+                            }));
+                        }
+                    }
+                    return;
+                }
+                let quiet = matches!(&request, Request::Status {});
                 let result = self.command(request);
                 let _ = reply.send(Response {
                     ok: result.is_ok(),
                     error: result.err().map(|error| format!("{error:#}")),
                     status: self.snapshot(),
+                    data: None,
                 });
-                if !matches!(request, Request::Status) {
+                if !quiet {
                     self.broadcast();
                 }
+            }
+            Event::Preferences(result, reply) => {
+                let error = match result {
+                    Ok(config) => {
+                        self.config = config;
+                        None
+                    }
+                    Err(error) => Some(format!("{error:#}")),
+                };
+                self.idle(error.clone());
+                let _ = reply.send(Response {
+                    ok: error.is_none(),
+                    error,
+                    status: self.snapshot(),
+                    data: None,
+                });
+                self.broadcast();
             }
             Event::Watch(watcher) => {
                 if watcher.try_send(self.snapshot()).is_ok() {
@@ -238,7 +442,35 @@ impl Service {
                 }
                 self.broadcast();
             }
-            Event::Recorded(id, result) => {
+            Event::FeedbackReady(feedback) => {
+                self.feedback = Some(feedback);
+            }
+            Event::Prepared(id, result, mut feedback) => {
+                if !self.generation.accepts(id) || result.is_err() {
+                    let error = result.as_ref().err().map(|error| format!("{error:#}"));
+                    let events = self.events.clone();
+                    self.helpers.push(thread::spawn(move || {
+                        drop(result);
+                        let _ = feedback.end(false);
+                        let _ = events.send(Event::FeedbackReady(feedback));
+                    }));
+                    if self.generation.accepts(id) {
+                        self.fail(format!("Cannot start recording: {:#}", error.unwrap()));
+                        self.broadcast();
+                    }
+                    return;
+                }
+                let (recorder, target) = result.unwrap();
+                self.recorder = Some(recorder);
+                self.target = target;
+                self.feedback = Some(feedback);
+                if self.stop_pending {
+                    self.stop();
+                }
+                self.broadcast();
+            }
+            Event::Recorded(id, result, feedback) => {
+                self.feedback = Some(feedback);
                 if !self.generation.accepts(id) {
                     return;
                 }
@@ -261,9 +493,17 @@ impl Service {
                 if !self.generation.accepts(id) {
                     return;
                 }
+                if let Some(text) = self.delivered_text.take()
+                    && self.config.history_enabled
+                    && !matches!(&result, Ok(false))
+                    && let Err(error) = self.history.add(&text)
+                {
+                    eprintln!("JustSpeak: cannot save transcript history: {error:#}");
+                }
+                let pasted = self.target.is_some();
                 match result {
                     Ok(true) => self.idle(Some(
-                        if self.config.paste {
+                        if pasted {
                             "Pasted"
                         } else {
                             "Copied to clipboard"
@@ -334,16 +574,23 @@ fn serve_client(mut stream: UnixStream, events: Sender<Event>) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(3)))?;
     stream.set_write_timeout(Some(Duration::from_secs(3)))?;
     let request: Request = serde_json::from_str(&protocol::read_line(&stream)?)?;
-    if matches!(request, Request::Watch) {
+    if matches!(request, Request::Watch {}) {
         let (sender, receiver) = mpsc::sync_channel(8);
-        events.send(Event::Watch(sender))?;
+        events
+            .send(Event::Watch(sender))
+            .map_err(|_| anyhow::anyhow!("service stopped"))?;
         for status in receiver {
             protocol::write_json(&mut stream, &status)?;
         }
     } else {
         let (sender, receiver) = mpsc::channel();
-        events.send(Event::Request(request, sender))?;
-        protocol::write_json(&mut stream, &receiver.recv_timeout(Duration::from_secs(4))?)?;
+        events
+            .send(Event::Request(request, sender))
+            .map_err(|_| anyhow::anyhow!("service stopped"))?;
+        protocol::write_json(
+            &mut stream,
+            &receiver.recv_timeout(Duration::from_secs(15))?,
+        )?;
     }
     Ok(())
 }
@@ -380,11 +627,15 @@ fn inference_worker(
     {
         Ok(engine) => engine,
         Err(error) => {
-            events.send(Event::Loaded(Err(error)))?;
+            events
+                .send(Event::Loaded(Err(error)))
+                .map_err(|_| anyhow::anyhow!("service stopped"))?;
             return Ok(());
         }
     };
-    events.send(Event::Loaded(Ok(())))?;
+    events
+        .send(Event::Loaded(Ok(())))
+        .map_err(|_| anyhow::anyhow!("service stopped"))?;
     for work in receiver {
         match work {
             Work::Transcribe(id, recording) => {
@@ -394,7 +645,9 @@ fn inference_worker(
                 let result = engine.transcribe(&recording.path);
                 // Recording is deleted before notifying the main service.
                 drop(recording);
-                events.send(Event::Transcribed(id, result))?;
+                events
+                    .send(Event::Transcribed(id, result))
+                    .map_err(|_| anyhow::anyhow!("service stopped"))?;
             }
             Work::Shutdown => break,
         }
@@ -419,7 +672,14 @@ pub fn run(config: Config) -> Result<()> {
     let listener_shutdown = shutdown.clone();
     let server =
         thread::spawn(move || accept_clients(listener, listener_events, listener_shutdown));
+    let history = History::load()?;
+    let feedback = Feedback::new()?;
     let mut service = Service {
+        history,
+        feedback: Some(feedback),
+        stop_pending: false,
+        shutdown: shutdown.clone(),
+        delivered_text: None,
         config,
         status: Status::default(),
         generation: Generation::default(),
@@ -458,6 +718,11 @@ pub fn run(config: Config) -> Result<()> {
     let _ = server.join();
     for helper in service.helpers {
         let _ = helper.join();
+    }
+    // Startup events may own capture/feedback guards. Release them before a
+    // canceled native inference finishes, so shutdown never keeps recording.
+    while let Ok(event) = receiver.try_recv() {
+        drop(event);
     }
     match inference.join() {
         Ok(result) => result?,

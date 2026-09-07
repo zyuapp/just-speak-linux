@@ -2,8 +2,13 @@ mod audio;
 mod config;
 mod daemon;
 mod desktop;
+mod feedback;
+mod history;
 mod inference;
+mod inputs;
 mod protocol;
+mod shortcut;
+mod updater;
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand};
@@ -21,7 +26,7 @@ use std::{
 #[derive(Parser)]
 #[command(
     version,
-    about = "Offline push-to-talk dictation for Omarchy / Hyprland"
+    about = "Offline dictation with a resident speech model and desktop integrations"
 )]
 struct Cli {
     /// Override the Parakeet model directory (default: XDG data directory).
@@ -53,13 +58,45 @@ enum Commands {
     Watch,
     /// Check local prerequisites without recording or pasting.
     Doctor,
+    /// Read settings, microphones, desktop capabilities and recent transcripts.
+    Menu {
+        #[arg(long)]
+        json: bool,
+    },
+    Input {
+        #[command(subcommand)]
+        command: InputCommand,
+    },
+    Settings {
+        #[command(subcommand)]
+        command: SettingsCommand,
+    },
+    Shortcut {
+        #[command(subcommand)]
+        command: ShortcutCommand,
+    },
+    History {
+        #[command(subcommand)]
+        command: HistoryCommand,
+    },
+    /// Open the shared GTK4 settings and history window.
+    Window,
+    Quit,
+    Launch,
+    Restart,
+    Update {
+        #[command(subcommand)]
+        command: UpdateCommand,
+    },
     /// Manage the separately downloaded speech model.
     Model {
         #[command(subcommand)]
         command: ModelCommand,
     },
     /// Transcribe a mono 16 kHz PCM16 WAV to stdout, without clipboard changes.
-    Transcribe { file: PathBuf },
+    Transcribe {
+        file: PathBuf,
+    },
     /// Measure first and resident inference; fails if the speed target is missed.
     Benchmark {
         file: PathBuf,
@@ -78,8 +115,53 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
+enum InputCommand {
+    Set { id: String },
+}
+#[derive(Subcommand)]
+enum SettingsCommand {
+    Set {
+        key: String,
+        #[arg(action = clap::ArgAction::Set)]
+        value: bool,
+    },
+}
+#[derive(Subcommand)]
+enum ShortcutCommand {
+    Set { shortcut: String },
+}
+#[derive(Subcommand)]
+enum HistoryCommand {
+    Copy { id: String },
+    Paste { id: String },
+    Clear,
+}
+#[derive(Subcommand)]
+enum UpdateCommand {
+    Check {
+        #[arg(long)]
+        json: bool,
+    },
+    Install {
+        #[arg(long)]
+        version: Option<String>,
+    },
+    #[command(hide = true)]
+    Apply {
+        #[arg(long)]
+        version: Option<String>,
+    },
+    #[command(hide = true)]
+    InstallArchive {
+        file: PathBuf,
+        #[arg(long)]
+        version: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum ModelCommand {
-    /// Download and SHA256-verify the pinned model (the only network operation).
+    /// Download and SHA256-verify the pinned model (separate from application updates).
     Download,
     /// Print the configured model path.
     Path,
@@ -124,6 +206,65 @@ fn run() -> Result<()> {
     match cli.command {
         Commands::Daemon => daemon::run(config),
         Commands::Doctor => doctor(&config),
+        Commands::Update { command } => match command {
+            UpdateCommand::Check { json } => {
+                let info = updater::check(&config.updates_repo)?;
+                if json {
+                    protocol::write_json(&mut io::stdout().lock(), &info)?;
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&info)?);
+                }
+                Ok(())
+            }
+            UpdateCommand::Install { version } => {
+                // The service outlives the menu that triggered it when UI assets reload.
+                let mut command = Command::new("systemd-run");
+                command.args([
+                    "--user",
+                    "--collect",
+                    "--wait",
+                    "--pipe",
+                    "--unit=just-speak-update",
+                ]);
+                for name in [
+                    "JUST_SPEAK_PREFIX",
+                    "XDG_CONFIG_HOME",
+                    "XDG_DATA_HOME",
+                    "XDG_STATE_HOME",
+                    "XDG_RUNTIME_DIR",
+                ] {
+                    if let Some(value) = env::var_os(name) {
+                        command
+                            .arg("--setenv")
+                            .arg(format!("{name}={}", value.to_string_lossy()));
+                    }
+                }
+                command.arg(env::current_exe()?).args(["update", "apply"]);
+                if let Some(version) = version {
+                    command.arg("--version").arg(version);
+                }
+                ensure!(
+                    command.status()?.success(),
+                    "Update failed; see `journalctl --user -u just-speak-update`"
+                );
+                Ok(())
+            }
+            UpdateCommand::Apply { version } => apply_update(&config, version.as_deref()),
+            UpdateCommand::InstallArchive { file, version } => {
+                let mut gated = false;
+                let result = updater::install_archive(&file, &version, || {
+                    if config::socket_path()?.exists() {
+                        control(Request::BeginUpdate {})?;
+                        gated = true;
+                    }
+                    Ok(())
+                });
+                if result.is_err() && gated {
+                    let _ = control(Request::EndUpdate {});
+                }
+                protocol::write_json(&mut io::stdout().lock(), &result?)
+            }
+        },
         Commands::Model { command } => match command {
             ModelCommand::Path => {
                 println!("{}", config.model_dir()?.display());
@@ -156,17 +297,164 @@ fn run() -> Result<()> {
 
 fn control_command(command: &Commands) -> Option<Result<()>> {
     Some(match command {
-        Commands::Start => control(Request::Start),
-        Commands::Stop => control(Request::Stop),
-        Commands::Cancel => control(Request::Cancel),
+        Commands::Start => control(Request::Start {}),
+        Commands::Stop => control(Request::Stop {}),
+        Commands::Cancel => control(Request::Cancel {}),
         Commands::Status { json } => service_status(*json),
         Commands::Watch => watch(),
+        Commands::Quit => control(Request::Quit {}),
+        Commands::Launch => user_service("start"),
+        Commands::Window => open_window(),
+        Commands::Restart => restart_service(),
+        Commands::Menu { json: _ } => menu(),
+        Commands::Input {
+            command: InputCommand::Set { id },
+        } => control(Request::SetInput {
+            input: if id == "default" {
+                None
+            } else {
+                Some(id.clone())
+            },
+        }),
+        Commands::Settings {
+            command: SettingsCommand::Set { key, value },
+        } => control(Request::SetOption {
+            key: key.clone(),
+            value: *value,
+        }),
+        Commands::Shortcut {
+            command: ShortcutCommand::Set { shortcut },
+        } => control(Request::SetShortcut {
+            shortcut: shortcut.clone(),
+        }),
+        Commands::History { command } => control(match command {
+            HistoryCommand::Copy { id } => Request::HistoryCopy { id: id.clone() },
+            HistoryCommand::Paste { id } => Request::HistoryPaste { id: id.clone() },
+            HistoryCommand::Clear => Request::HistoryClear {},
+        }),
         _ => return None,
     })
 }
 
+fn open_window() -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    let exe = env::current_exe()?;
+    let prefix = env::var_os("JUST_SPEAK_PREFIX")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local")));
+    let stable = prefix
+        .as_ref()
+        .map(|prefix| prefix.join("bin/just-speak"))
+        .filter(|path| path.canonicalize().is_ok_and(|resolved| resolved == exe))
+        .or_else(|| {
+            let path = PathBuf::from("/usr/bin/just-speak");
+            path.canonicalize()
+                .is_ok_and(|resolved| resolved == exe)
+                .then_some(path)
+        })
+        .unwrap_or_else(|| exe.clone());
+    let mut candidates = Vec::new();
+    if let Some(prefix) = prefix {
+        candidates.push(prefix.join("share/just-speak/gtk/main.js"));
+    }
+    candidates.push(PathBuf::from("/usr/share/just-speak/gtk/main.js"));
+    if let Some(root) = exe.parent().and_then(Path::parent).and_then(Path::parent) {
+        candidates.push(root.join("gtk/main.js"));
+    }
+    let path = candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .context("GTK window not installed; reinstall JustSpeak")?;
+    Err(Command::new("gjs")
+        .arg("-m")
+        .arg(path)
+        .env("JUST_SPEAK_BIN", stable)
+        .exec())
+    .context("Open GTK4 window (requires gjs and GTK4)")
+}
+
+fn menu() -> Result<()> {
+    let response = protocol::call(&config::socket_path()?, Request::Menu {})?;
+    ensure!(
+        response.ok,
+        "{}",
+        response.error.as_deref().unwrap_or("menu failed")
+    );
+    protocol::write_json(
+        &mut io::stdout().lock(),
+        &response.data.context("menu data missing")?,
+    )
+}
+
+fn user_service(action: &str) -> Result<()> {
+    ensure!(
+        Command::new("systemctl")
+            .args(["--user", action, "just-speak.service"])
+            .status()?
+            .success(),
+        "Cannot {action} JustSpeak user service"
+    );
+    Ok(())
+}
+
+fn restart_service() -> Result<()> {
+    if let Ok(response) = protocol::call(&config::socket_path()?, Request::Status {}) {
+        ensure!(
+            !response.status.can_cancel && response.status.phase != protocol::Phase::Updating,
+            "Finish or cancel dictation before restarting"
+        );
+    }
+    user_service("restart")
+}
+
+fn apply_update(config: &Config, version: Option<&str>) -> Result<()> {
+    let socket = config::socket_path()?;
+    let was_running = socket.exists();
+    let mut gated = false;
+    let result = updater::install(&config.updates_repo, version, || {
+        if was_running {
+            control(Request::BeginUpdate {})?;
+            gated = true;
+        }
+        Ok(())
+    });
+    match result {
+        Ok(result) => {
+            if was_running {
+                user_service("restart")?;
+            }
+            if Command::new("systemctl")
+                .args([
+                    "--user",
+                    "is-active",
+                    "--quiet",
+                    "just-speak-overlay.service",
+                ])
+                .status()
+                .is_ok_and(|s| s.success())
+            {
+                let _ = Command::new("systemctl")
+                    .args(["--user", "restart", "just-speak-overlay.service"])
+                    .status();
+            }
+            if executable_exists("omarchy-shell") {
+                let _ = Command::new("omarchy-shell")
+                    .args(["shell", "rescanPlugins"])
+                    .status();
+            }
+            protocol::write_json(&mut io::stdout().lock(), &result)
+        }
+        Err(error) => {
+            if gated {
+                let _ = control(Request::EndUpdate {});
+            }
+            Err(error)
+        }
+    }
+}
+
 fn service_status(json: bool) -> Result<()> {
-    let response = protocol::call(&config::socket_path()?, Request::Status)?;
+    let response = protocol::call(&config::socket_path()?, Request::Status {})?;
     if json {
         protocol::write_json(&mut io::stdout().lock(), &response.status)?;
     } else {
@@ -201,7 +489,7 @@ fn print_status(status: &Status) {
 }
 
 fn watch() -> Result<()> {
-    let stream = protocol::connect(&config::socket_path()?, Request::Watch)?;
+    let stream = protocol::connect(&config::socket_path()?, Request::Watch {})?;
     let mut output = io::stdout().lock();
     for line in BufReader::new(stream).lines() {
         let status: Status = serde_json::from_str(&line?)?;
@@ -243,10 +531,15 @@ fn executable_exists(name: &str) -> bool {
 
 fn doctor(config: &Config) -> Result<()> {
     let mut healthy = true;
-    for program in ["pw-record", "wl-copy", "hyprctl"] {
+    for program in ["pw-record", "pw-dump", "wl-copy"] {
         let exists = executable_exists(program);
         println!("{} {program}", if exists { "OK     " } else { "MISSING" });
         healthy &= exists;
+    }
+    if desktop::capabilities().experimental {
+        println!(
+            "NOTE    Experimental desktop integration: clipboard delivery only; global shortcuts and automatic paste are not verified on GNOME."
+        );
     }
     let model_dir = config.model_dir()?;
     match inference::validate_model(&model_dir) {
@@ -258,14 +551,14 @@ fn doctor(config: &Config) -> Result<()> {
     }
     if config.paste {
         match desktop::check() {
-            Ok(()) => println!("OK      Hyprland desktop connection"),
+            Ok(()) => println!("OK      desktop adapter: {}", desktop::capabilities().name),
             Err(error) => {
                 println!("ERROR   desktop: {error:#}");
                 healthy = false;
             }
         }
     }
-    match protocol::call(&config::socket_path()?, Request::Status) {
+    match protocol::call(&config::socket_path()?, Request::Status {}) {
         Ok(response) => {
             print!("OK      daemon: ");
             print_status(&response.status);

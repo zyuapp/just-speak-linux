@@ -1,4 +1,9 @@
-# Verification on the development machine
+> Historical baseline from September 6. Version 0.2 adds persistent interfaces,
+> private transcript history, feedback, and updates; its release checks are tracked
+> in [release verification](release-verification.md). The user subsequently
+> confirmed the installed Omarchy F10 dictation workflow works well.
+
+# Initial prototype verification on the development machine
 
 Date: 2026-09-06. This is a functional prototype, **not a claim that the original
 20× speed requirement has been met**.

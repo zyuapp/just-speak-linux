@@ -1,0 +1,19 @@
+[package]
+name = "sherpa-onnx-sys"
+version = "1.13.7"
+edition = "2021"
+description = "Raw sherpa-onnx C API bindings, with JustSpeak's ASR-only native linker"
+license = "Apache-2.0"
+repository = "https://github.com/k2-fsa/sherpa-onnx"
+readme = "README.md"
+links = "sherpa-onnx"
+build = "build.rs"
+
+[features]
+default = ["static"]
+static = []
+shared = []
+
+[lib]
+name = "sherpa_onnx_sys"
+path = "src/lib.rs"

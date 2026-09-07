@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=JustSpeak
+Comment=Local voice dictation, microphone settings, and transcript history
+Exec=just-speak window
+Icon=audio-input-microphone
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=dictation;voice;speech;transcription;
+StartupNotify=true
+StartupWMClass=io.github.zyuapp.JustSpeak

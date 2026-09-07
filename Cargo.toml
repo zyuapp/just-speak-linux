@@ -1,9 +1,9 @@
 [package]
 name = "just-speak"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Offline push-to-talk dictation for Omarchy and Hyprland"
+description = "Offline Linux dictation with shared desktop interfaces"
 license = "MIT"
 
 [dependencies]
@@ -15,6 +15,10 @@ hound = "3.5.1"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
+semver = "1"
+tar = "0.4"
+flate2 = "1"
 sherpa-onnx = "=1.13.7"
 tempfile = "3"
 toml = "0.9"
@@ -23,3 +27,6 @@ toml = "0.9"
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
+
+[patch.crates-io]
+sherpa-onnx-sys = { path = "vendor/sherpa-onnx-sys" }

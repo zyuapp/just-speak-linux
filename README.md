@@ -1,140 +1,156 @@
 # JustSpeak for Linux
 
-Local push-to-talk dictation for **Omarchy 4 / Hyprland 0.56**. Hold F10, speak,
-release to transcribe and paste. Escape cancels. The model stays in memory in a
-small Rust service; Quickshell provides an optional bar control and recording
-indicator that never takes keyboard focus.
+Offline voice dictation with a resident Rust speech service, a shared GTK4 window,
+and an optional Omarchy bar menu. On Omarchy, hold **F10**, speak, then release to
+transcribe and paste. **Escape** cancels. Existing Voxtype **F9** bindings are
+preserved.
 
-This is an initial Linux implementation of [JustSpeak](https://github.com/zyuapp/just-speak).
-It uses English Parakeet TDT 0.6B v2 through sherpa-onnx on the CPU. NVIDIA/CUDA
-inference is not implemented in this build. See [measured verification](docs/verification.md)
-for performance and the limits of testing on the development machine.
+One repository serves both desktop interfaces. Omarchy 4 / Hyprland 0.56 Lua is the
+verified desktop integration. **Ubuntu GNOME/Wayland integration is experimental**:
+the shared window and backend are intended to work there, but global hold-to-talk
+and automatic paste have not been tested on GNOME. See [desktop support](docs/desktop-support.md).
 
-## Build and try
+## Install a release
 
-Requirements: Rust 1.88+, a C/C++ toolchain, PipeWire audio tools (`pw-record`),
-`wl-clipboard`, and Hyprland with Lua configuration. The model downloader also
-uses Bash, curl, Python 3, coreutils, and util-linux. Quickshell 0.3 is optional.
-Lua is needed to run the compositor-integration unit tests.
+Run as your normal desktop user:
 
 ```sh
-make build
-make model
-make run
+curl -fsSL https://raw.githubusercontent.com/zyuapp/just-speak-linux/main/scripts/install-release.sh | bash
 ```
 
-Keep that daemon running. From another terminal in the same desktop session:
+The installer downloads the latest Linux x86_64 release, verifies its SHA256,
+installs under `~/.local`, downloads the separately pinned English speech model,
+and enables the user service. It activates the optional bar integration only on
+Omarchy. It does not install system dependencies or silently replace your shortcuts.
+Review the [installer](scripts/install-release.sh) before running it if preferred.
+For supported options, download it and run `bash install-release.sh --help`.
+
+On Omarchy, choose **F10** in the app's shortcut editor, or run:
 
 ```sh
-target/release/just-speak status
-target/release/just-speak start
-# Speak, then:
-target/release/just-speak stop
-# Or: target/release/just-speak cancel
+~/.local/bin/just-speak shortcut set F10
 ```
 
-The one-time model download is about 483 MB (decimal), with roughly 661 MB of
-installed files. Its official release archive is pinned by SHA256 and extracted
-into a staging directory before publication. Transcription runs entirely locally.
-The first Rust build downloads Cargo dependencies and sherpa-onnx's static native
-runtime; subsequent builds can use their caches. The model is separate from Git
-and from the executable.
+The editor checks existing bindings, backs up your configuration, and rejects
+conflicts. Omarchy's existing F9 Voxtype shortcut stays intact. On GNOME, use the
+window's Start/Stop controls and manual clipboard paste while native integration
+is being developed.
 
-For file transcription without touching the clipboard:
+Requirements: Linux x86_64, a user systemd session, PipeWire (`pw-record`,
+`pw-dump`, `pw-play`), WirePlumber (`wpctl`), `wl-clipboard`, Bash, curl, Python 3,
+coreutils and util-linux. The shared window needs **GJS and GTK4 introspection**.
+The Omarchy bar uses its installed Quickshell shell. The installer reports missing
+dependencies rather than invoking a package manager with elevated privileges.
+
+## Use the app
+
+Open **JustSpeak** from your application launcher, run `just-speak window`, or
+click its Omarchy bar icon. The service keeps the speech model loaded after the
+window closes.
+
+- Choose a microphone by its stable PipeWire name, or follow the system default.
+- Review the last ten transcripts, copy or paste an entry, or clear history.
+- Edit the shortcut on supported Hyprland Lua desktops.
+- Toggle recording sounds, output muting, automatic paste, history, and update checks.
+- Check for and install application updates; restart or quit the service.
+
+The recording indicator shows listening, transcription, cancellation and errors.
+Optional sounds bracket capture. Output muting restores the original sink when
+recording ends; recovery also checks for an interrupted previous service. User
+volume/mute changes and replaced audio devices are not blindly overwritten.
 
 ```sh
-target/release/just-speak --model-dir models/parakeet-tdt-0.6b-v2-int8 \
-  transcribe models/parakeet-tdt-0.6b-v2-int8/test_wavs/0.wav
-```
-
-## Install and integrate
-
-```sh
-make install
-# Ensure ~/.local/bin is on PATH in your desktop session.
-just-speak model download
-systemctl --user daemon-reload
-systemctl --user enable --now just-speak.service
+just-speak status
 just-speak doctor
+just-speak start
+just-speak stop
+just-speak cancel
+just-speak update check --json
+just-speak update install
 ```
 
-The installed service uses the default XDG model directory. To reuse the model
-downloaded by `make model`, set its **absolute** path as `model_dir` in the config
-below instead of downloading again.
+`just-speak launch` starts the installed user service; `just-speak restart` reloads
+it when idle. `just-speak quit` stops it. The app launcher/window remains available
+to start it again.
 
-See [desktop integration](packaging/README.md) for the F10/Escape binding snippet,
-Omarchy bar widget, optional standalone overlay, Arch package, and removal steps.
-**F10 controls JustSpeak; F9 remains assigned to Voxtype.** Check for custom
-F10 bindings before applying the snippet. The installer only copies app
-files and user service units. It does not change your hotkeys, start services,
-or enable a bar widget.
+## Privacy and behavior
 
-## Configuration
+Transcription uses English **Parakeet TDT 0.6B v2 INT8**, through an ASR-only
+sherpa-onnx CPU runtime. There is no cloud transcription, account, telemetry, or
+CUDA dependency. The one-time model download is about 483 MB; installed model
+files occupy about 661 MB and are separate from application updates.
+
+Audio exists only in private temporary WAV files during recording/transcription.
+Normal completion, cancellation and shutdown delete them; a hard crash can leave
+private temporary files until system cleanup. Enabled history stores the last ten
+completed transcripts locally at `~/.local/state/just-speak/history.json`, with
+private file permissions. Turning history off stops new retention; **Clear
+history** deletes existing entries. History and clipboard contents may contain
+sensitive text, so use these controls as appropriate.
+
+Model downloads contact the upstream model host. Enabled update checks contact
+GitHub on UI startup when idle and at most every six hours per interface; manual
+checks run immediately. Checks transmit no recordings or transcripts. Application
+updates require an explicit Install action. Checksums detect corrupt/tampered
+payloads relative to the trusted GitHub release metadata; they are not an
+independent publisher signature. See [updates and rollback](docs/updates.md).
+
+On Hyprland, paste is guarded by the original window identity. If focus changes,
+the text is copied and automatic paste is skipped. A canceled inference result is
+discarded; an already delivered clipboard write or keystroke cannot be retracted.
+Recordings have a configurable 1–120 second limit.
+
+## Settings
 
 Optional `${XDG_CONFIG_HOME:-~/.config}/just-speak/config.toml`:
 
 ```toml
-num_threads = 6 # Default: available CPU parallelism, capped at 6.
+num_threads = 6
 paste = true
 max_recording_seconds = 120
+shortcut = "F10"
+sound_feedback = true
+mute_while_recording = true
+history_enabled = true
+auto_check_updates = true
 # model_dir = "/absolute/path/to/parakeet-tdt-0.6b-v2-int8"
-# input = "PipeWire node name or object serial"
+# input = "stable PipeWire node.name"
 ```
 
-Restart the service after changing settings. `--model-dir` and `--threads`
-override settings for the process being launched; they do not reconfigure an
-already-running daemon. `just-speak model path` prints the configured model path.
-With `paste = false`, completed dictation is copied to the clipboard only.
+Menu changes take effect immediately when idle. Restart after manually editing
+configuration. `--model-dir` and `--threads` override a newly launched process;
+they do not reconfigure an already-running service.
 
-## Behavior and limits
+## Build and verify
 
-- Audio is captured only while recording, as private temporary 16 kHz mono PCM16
-  WAV. Completed/canceled recordings are deleted during normal operation and
-  graceful shutdown. A forced kill or machine crash can leave private temporary
-  files until system temporary-file cleanup.
-- Hold/release events control recording directly. There is no silence timeout;
-  the configurable recording limit is 1–120 seconds. File input has a 121-second
-  safety bound to accommodate capture shutdown timing.
-- Cancellation immediately invalidates pending output. Native inference already
-  in progress finishes internally, and its result is discarded. Clipboard
-  delivery checks cancellation again before requesting a paste; a paste already
-  dispatched cannot be retracted.
-- Automatic paste requires the original window to remain focused, with the same
-  address, class, and process. If focus changed, text stays on the clipboard and
-  status explains why paste was skipped. It never sends Enter. Terminals use
-  Ctrl+Shift+V; other applications use Ctrl+V. Custom app shortcuts may require
-  manual paste. The previous clipboard content is replaced.
-- Escape is nonconsuming: it cancels dictation and also reaches the focused app.
-  Starting while transcribing is rejected unless the pending result is canceled.
-  Repeated start/stop events are idempotent.
-- Exact digital silence and taps shorter than 100 ms are discarded. Very short
-  speech is padded for inference. Background noise is not classified by a VAD.
-- English dictation only, CPU only, and this Hyprland version family only. There
-  is no server, LLM rewriting, transcript history, or telemetry.
-
-## Verification
+Requires Rust 1.88+, a C/C++ toolchain, CMake, Make, curl, tar, Python 3, and Lua for
+Hyprland integration tests. Build the pinned native runtime without unused TTS
+components, then the app:
 
 ```sh
+./scripts/build-runtime.sh "$PWD/native"
+export SHERPA_ONNX_LIB_DIR="$PWD/native/lib"
+make build
 make check
-make smoke                    # Uses fake capture/paste, with the real local model.
-make pipewire-test            # Isolated native PipeWire server; no real microphone.
-make benchmark FILE=/path/to/real-speech.wav
-JUST_SPEAK_TEST_MODEL_DIR="$PWD/models/parakeet-tdt-0.6b-v2-int8" \
-  cargo test real_model -- --ignored
+make model
+make smoke
 ```
 
-The benchmark excludes model loading from resident inference, reports first-use
-latency separately, and returns failure below **20× real time**. Use `--threads`
-to compare CPU settings; `--expected-text` checks a phrase in every transcript.
-Short-utterance response and full microphone-to-paste latency need separate
-measurement. The smoke test uses isolated XDG directories and fake desktop/audio
-helpers, so it does not record your microphone or type into your applications.
+The runtime builder verifies pinned downloads and assembles their redistribution
+notices. The vendored Rust linker refuses the general-purpose upstream runtime.
+Release packaging includes application source and the native/Rust license bundle.
 
-Runtime state is available through `status --json` and `watch` (newline JSON).
-The daemon uses a private Unix socket under `$XDG_RUNTIME_DIR/just-speak` with a
-single-instance lock. Status and service logs omit transcript text.
+File transcription does not touch the clipboard:
 
-Original source: MIT. The current local executable also links GPL-licensed
-eSpeak code from the upstream native runtime. Runtime and model terms, including
-this distinction for binary distribution, are documented in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+```sh
+just-speak transcribe /path/to/mono-16khz-pcm16.wav
+```
+
+Measured resident CPU inference on a Ryzen 5 5600H reached roughly **17× real
+time** for a 59-second fixture. The aspirational 20× benchmark gate remains
+unmet on that hardware. See [verification](docs/verification.md) and the
+[CUDA experiment](docs/gpu-benchmark.md); GPU support is not shipped.
+
+Original application source is MIT licensed. Dependencies retain their own
+licenses; see [third-party notices](THIRD_PARTY_NOTICES.md) and the license bundle
+included in each binary release.

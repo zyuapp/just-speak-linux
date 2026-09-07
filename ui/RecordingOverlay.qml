@@ -79,7 +79,7 @@ Scope {
                     Text {
                         width: parent.width
                         text: root.feed.phase === "error" ? root.feed.message
-                              : root.feed.phase === "recording" ? "Release F10 to paste · Esc to cancel"
+                              : root.feed.phase === "recording" ? "Release " + root.feed.shortcut + " to finish · Esc to cancel"
                               : root.feed.phase === "transcribing" ? "Esc to cancel" : "Preparing local dictation"
                         textFormat: Text.PlainText
                         wrapMode: Text.Wrap

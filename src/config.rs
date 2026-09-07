@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{env, fs, path::PathBuf};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub model_dir: Option<PathBuf>,
@@ -10,6 +10,12 @@ pub struct Config {
     pub num_threads: usize,
     pub paste: bool,
     pub max_recording_seconds: u64,
+    pub shortcut: String,
+    pub sound_feedback: bool,
+    pub mute_while_recording: bool,
+    pub history_enabled: bool,
+    pub updates_repo: String,
+    pub auto_check_updates: bool,
 }
 
 impl Default for Config {
@@ -20,6 +26,12 @@ impl Default for Config {
             num_threads: std::thread::available_parallelism().map_or(4, |n| n.get().min(6)),
             paste: true,
             max_recording_seconds: 120,
+            shortcut: "F10".into(),
+            sound_feedback: true,
+            mute_while_recording: true,
+            history_enabled: true,
+            updates_repo: "zyuapp/just-speak-linux".into(),
+            auto_check_updates: true,
         }
     }
 }
@@ -49,6 +61,55 @@ impl Config {
                 "model_dir must be an absolute path (shell ~ expansion is not supported in TOML)"
             );
         }
+        crate::shortcut::normalize(&self.shortcut)?;
+        Ok(())
+    }
+
+    /// Preserve comments and unrelated settings when changing a menu preference.
+    pub fn save_preference(&self, key: &str) -> Result<()> {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let path = config_path()?;
+        let directory = path.parent().context("config directory missing")?;
+        fs::create_dir_all(directory)?;
+        let mut text = if path.exists() {
+            fs::read_to_string(&path)?
+        } else {
+            String::new()
+        };
+        let values = toml::Value::try_from(self)?;
+        let value = values.get(key);
+        let replacement = value.map(|value| format!("{key} = {value}"));
+        let mut found = false;
+        let lines: Vec<String> = text
+            .lines()
+            .filter_map(|line| {
+                if line
+                    .split_once('=')
+                    .is_some_and(|(name, _)| name.trim() == key)
+                {
+                    found = true;
+                    replacement.clone()
+                } else {
+                    Some(line.to_owned())
+                }
+            })
+            .collect();
+        text = lines.join("\n");
+        if !found && let Some(line) = replacement {
+            text.push_str(&format!("\n{line}"));
+        }
+        text.push('\n');
+        let decoded: Self = toml::from_str(&text)
+            .context("existing config cannot be updated; fix its syntax first")?;
+        decoded.validate()?;
+        let mut staged = tempfile::NamedTempFile::new_in(directory)?;
+        staged
+            .as_file()
+            .set_permissions(fs::Permissions::from_mode(0o600))?;
+        staged.write_all(text.as_bytes())?;
+        staged.as_file().sync_all()?;
+        staged.persist(&path)?;
         Ok(())
     }
 

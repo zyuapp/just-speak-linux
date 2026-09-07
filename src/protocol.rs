@@ -7,38 +7,24 @@ use std::{
     time::Duration,
 };
 
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(tag = "command", rename_all = "snake_case")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
-    Start,
-    Stop,
-    Cancel,
-    Status,
-    Watch,
-}
-
-impl<'de> Deserialize<'de> for Request {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        // A tagged unit enum ignores extra fields even with deny_unknown_fields.
-        // Decode a strict envelope first so malformed protocol input is rejected.
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Envelope {
-            command: String,
-        }
-        let envelope = Envelope::deserialize(deserializer)?;
-        match envelope.command.as_str() {
-            "start" => Ok(Self::Start),
-            "stop" => Ok(Self::Stop),
-            "cancel" => Ok(Self::Cancel),
-            "status" => Ok(Self::Status),
-            "watch" => Ok(Self::Watch),
-            command => Err(serde::de::Error::unknown_variant(
-                command,
-                &["start", "stop", "cancel", "status", "watch"],
-            )),
-        }
-    }
+    Start {},
+    Stop {},
+    Cancel {},
+    Status {},
+    Watch {},
+    Menu {},
+    SetInput { input: Option<String> },
+    SetOption { key: String, value: bool },
+    SetShortcut { shortcut: String },
+    HistoryCopy { id: String },
+    HistoryPaste { id: String },
+    HistoryClear {},
+    Quit {},
+    BeginUpdate {},
+    EndUpdate {},
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,6 +35,7 @@ pub enum Phase {
     Recording,
     Transcribing,
     Error,
+    Updating,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +45,8 @@ pub struct Status {
     pub elapsed_seconds: Option<f64>,
     pub model_ready: bool,
     pub can_cancel: bool,
+    #[serde(default)]
+    pub shortcut: String,
 }
 
 impl Default for Status {
@@ -68,6 +57,7 @@ impl Default for Status {
             elapsed_seconds: None,
             model_ready: false,
             can_cancel: false,
+            shortcut: "F10".into(),
         }
     }
 }
@@ -77,6 +67,8 @@ pub struct Response {
     pub ok: bool,
     pub status: Status,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
 }
 
 pub fn read_line(reader: impl Read) -> Result<String> {
@@ -106,8 +98,18 @@ pub fn connect(path: &Path, request: Request) -> Result<UnixStream> {
 
 pub fn call(path: &Path, request: Request) -> Result<Response> {
     let stream = connect(path, request)?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    serde_json::from_str(&read_line(stream)?).context("invalid response from JustSpeak")
+    stream.set_read_timeout(Some(Duration::from_secs(16)))?;
+    let mut line = String::new();
+    BufReader::new(stream.take(1024 * 1024)).read_line(&mut line)?;
+    ensure_response_complete(&line)?;
+    serde_json::from_str(&line).context("invalid response from JustSpeak")
+}
+
+fn ensure_response_complete(line: &str) -> Result<()> {
+    if !line.ends_with('\n') {
+        bail!("response incomplete or exceeds 1 MiB");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -128,8 +130,8 @@ mod tests {
     #[test]
     fn json_protocol_works_over_a_real_unix_socket() {
         let (mut sender, receiver) = UnixStream::pair().unwrap();
-        write_json(&mut sender, &Request::Cancel).unwrap();
+        write_json(&mut sender, &Request::Cancel {}).unwrap();
         let request: Request = serde_json::from_str(&read_line(receiver).unwrap()).unwrap();
-        assert!(matches!(request, Request::Cancel));
+        assert!(matches!(request, Request::Cancel {}));
     }
 }

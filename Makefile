@@ -13,7 +13,7 @@ check:
 	$(CARGO) fmt --check
 	$(CARGO) clippy --locked --all-targets -- -D warnings
 	$(CARGO) test --locked
-	bash -n scripts/download-model.sh scripts/install.sh
+	bash -n scripts/*.sh
 	luac -p packaging/hyprland.lua
 
 model:

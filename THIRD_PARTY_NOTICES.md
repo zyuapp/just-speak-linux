@@ -1,41 +1,56 @@
 # Third-party notices
 
 JustSpeak's original source code is licensed under the [MIT License](LICENSE).
-Dependencies and downloaded models retain their own licenses. This document
-records the principal native dependencies of the current local prototype; it
-is not a complete inventory of every Rust or native dependency.
+Native libraries, Rust dependencies, and downloaded models retain their own
+licenses. Binary distributions must include this document and the generated
+`licenses/` directory; a source license alone does not describe the executable.
 
-The current release executable statically includes eSpeak NG under
-**GPL-3.0-or-later**, through sherpa-onnx's default TTS-enabled native runtime,
-even though JustSpeak only uses speech recognition. This was confirmed in the
-local executable by the presence of `espeak_Initialize`, `espeak_Cancel`, and
-Piper phonemization symbols. The combined executable is **not MIT-only**.
-The installation script and PKGBUILD currently support local prototype builds;
-no binary release is published by this project.
+## Native recognition runtime
 
-## Native runtime
+`scripts/build-runtime.sh` builds sherpa-onnx 1.13.7 for CPU recognition with
+`SHERPA_ONNX_ENABLE_TTS=OFF`. It also disables GPU support, speaker diarization,
+PortAudio, WebSocket support, examples, and runtime executables. JustSpeak's
+vendored Rust linker requires this runtime explicitly and does not download the
+upstream TTS-enabled prebuilt archive. The changed linker is documented in
+[vendor/sherpa-onnx-sys/JUSTSPEAK_PATCH.md](vendor/sherpa-onnx-sys/JUSTSPEAK_PATCH.md);
+its FFI declarations and upstream license are unchanged.
 
-| Component | Version or source revision | Upstream license and notices |
+All native C++ is compiled with `_GLIBCXX_USE_CXX11_ABI=0` to match the pinned
+ONNX Runtime archive. Mixing its old string ABI with a host compiler's default
+new ABI can abort in shared `std::regex` internals during runtime startup.
+
+The build verifies the source archive and upstream dependency hashes, rejects
+TTS libraries, and checks defined symbols for eSpeak NG and Piper. The resulting
+runtime excludes eSpeak NG, Piper phonemize, and ucd. Earlier local prototype
+executables used the upstream TTS-enabled archive and contained GPL-3.0-or-later
+eSpeak NG; those executables are not the runtime used for public releases.
+
+| Component | Version or revision | License and upstream source |
 | --- | --- | --- |
-| sherpa-onnx, including its Rust bindings | 1.13.7 | [Apache-2.0](https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.7/LICENSE); [source](https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.7) |
-| ONNX Runtime | 1.27.1, as identified in the linked static runtime | [MIT](https://github.com/microsoft/onnxruntime/blob/v1.27.1/LICENSE), copyright Microsoft Corporation; [third-party notices](https://github.com/microsoft/onnxruntime/blob/v1.27.1/ThirdPartyNotices.txt); [source](https://github.com/microsoft/onnxruntime/tree/v1.27.1) |
-| eSpeak NG, as selected by sherpa-onnx 1.13.7 | `csukuangfj/espeak-ng` revision `ed530aa113046142eb5115cf2fc9157854d0ffe1` | [GPL version 3 or later](https://github.com/espeak-ng/espeak-ng#license-information); [license text in selected source](https://github.com/csukuangfj/espeak-ng/blob/ed530aa113046142eb5115cf2fc9157854d0ffe1/COPYING); [source selection](https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.7/cmake/espeak-ng-for-piper.cmake) |
-| Piper phonemize, as selected by sherpa-onnx 1.13.7 | `csukuangfj/piper-phonemize` revision `f3ff95afc03640bc1399e113e83361192a2fafb4` | [MIT](https://github.com/rhasspy/piper-phonemize/blob/master/LICENSE.md), copyright 2023 Michael Hansen; [selected source](https://github.com/csukuangfj/piper-phonemize/tree/f3ff95afc03640bc1399e113e83361192a2fafb4); [source selection](https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.7/cmake/piper-phonemize.cmake) |
+| sherpa-onnx and Rust bindings | 1.13.7 | [Apache-2.0](https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.7/LICENSE) |
+| ONNX Runtime | 1.27.1 | [MIT](https://github.com/microsoft/onnxruntime/blob/v1.27.1/LICENSE), Microsoft Corporation; [third-party notices](https://github.com/microsoft/onnxruntime/blob/v1.27.1/ThirdPartyNotices.txt) |
+| kaldi-decoder | 0.3.0 | [Apache-2.0](https://github.com/k2-fsa/kaldi-decoder/tree/v0.3.0) |
+| kaldifst | 1.8.0 | [Apache-2.0](https://github.com/k2-fsa/kaldifst/tree/v1.8.0); embedded libc++ basic-filebuf has MIT / University of Illinois notices |
+| OpenFst | 1.8.5-2026-07-09 | [Apache-2.0](https://github.com/csukuangfj/openfst/tree/v1.8.5-2026-07-09), Google LLC |
+| kaldi-native-fbank | 1.22.3 | [Apache-2.0](https://github.com/csukuangfj/kaldi-native-fbank/tree/v1.22.3) |
+| KISS FFT | febd4caeed32e33ad8b2e0bb5ea77542c40f18ec | [BSD-3-Clause](https://github.com/mborgerding/kissfft/tree/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec), Mark Borgerding |
+| simple-sentencepiece | 0.7 | [Apache-2.0](https://github.com/pkufool/simple-sentencepiece/tree/v0.7); embedded Darts clone (BSD-2-Clause, Susumu Yata) and ThreadPool (zlib, Jakob Progsch and Václav Zeman) |
+| Eigen | 5.0.1 | [MPL-2.0 and compatible third-party notices](https://gitlab.com/libeigen/eigen/-/tree/5.0.1) |
+| nlohmann JSON | 3.12.0 | [MIT](https://github.com/nlohmann/json/blob/v3.12.0/LICENSE.MIT), Niels Lohmann |
 
-The linked upstream texts define their respective terms. Apache-2.0 section 4
-requires preservation of its license and applicable notices upon redistribution.
-MIT requires preservation of its copyright and permission notices. GPLv3
-sections 4–6 set the terms for conveying source and object code, including
-corresponding-source requirements for object code. This summary and the source
-links do not replace those texts or constitute a complete binary distribution
-package.
+The build copies each component's license and available notices into
+`OUTPUT_DIRECTORY/licenses/native`, including notices embedded in third-party
+headers and ONNX Runtime's complete `ThirdPartyNotices.txt`. It also includes
+an archive of the exact Eigen source used in the build, preserving the source
+and notices for this MPL-2.0 header library. `inventory.json` lists the collected
+texts. The native components' own license terms remain authoritative.
 
-Sherpa-onnx's
-[CMake configuration](https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.7/CMakeLists.txt)
-provides `SHERPA_ONNX_ENABLE_TTS=OFF` for a native build without its TTS
-dependencies. JustSpeak currently uses the upstream prebuilt runtime with TTS
-enabled. Its Rust dependency also names the TTS static libraries explicitly in
-the [linker configuration](https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.7/sherpa-onnx/rust/sherpa-onnx-sys/build.rs).
+The pinned sherpa-onnx source archive is
+`https://codeload.github.com/k2-fsa/sherpa-onnx/tar.gz/refs/tags/v1.13.7`, SHA256
+`ee0c20cafb34cc1f86afb2845babd941c26e46de4a9925cbe86fd55ff3557818`.
+Its CMake files pin the transitive native dependencies. The prebuilt CPU ONNX
+Runtime archive selected by that source is version 1.27.1, SHA256
+`6b4df7fc46d3367b6be73fdea80dee323b9dc9eaa8dc50136a33d8524e7f06bb`.
 
 ## Downloaded recognition model
 
