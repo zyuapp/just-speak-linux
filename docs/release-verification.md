@@ -1,6 +1,6 @@
 # Version 0.2 release verification
 
-## Upgrade interface refresh (0.2.2)
+## Upgrade interface refresh (0.2.3)
 
 A live 0.2.1 popup remained stale after a successful OTA file switch and plugin
 rescan. Restarting the Omarchy shell loaded the correct Record shortcut button.

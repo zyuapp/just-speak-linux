@@ -112,7 +112,7 @@ The speech model is not bundled in the binary archive. Its explicit downloader v
 
 ## Omarchy interface after upgrades
 
-Starting with 0.2.2, a successful OTA upgrade restarts the Omarchy shell when
+Starting with 0.2.3, a successful OTA upgrade restarts the Omarchy shell when
 JustSpeak's bar plugin is installed and enabled. This briefly reloads the bar
 and its popups so cached QML cannot survive the upgrade. The standalone GTK
 window still needs to be closed and reopened when its own code changes.
@@ -129,6 +129,7 @@ After unlocking or resolving the error, retry without reinstalling:
 just-speak update refresh-ui
 ```
 
-The 0.2.1 updater itself predates this fix. Use the 0.2.2 release installer for
-that transition, or run the refresh command once after its OTA upgrade.
+Older updaters, including the local 0.2.2 development build, predate this fix.
+Use the 0.2.3 release installer for that transition, or run the refresh command
+once after the first OTA upgrade if the popup remains stale.
 Subsequent upgrades use the corrected automatic refresh path.
