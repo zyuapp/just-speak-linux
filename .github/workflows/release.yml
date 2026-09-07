@@ -21,7 +21,7 @@ jobs:
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: '2'
       SHERPA_ONNX_LIB_DIR: ${{ github.workspace }}/native/lib
-      JUST_SPEAK_TEST_MODEL_DIR: ${{ runner.temp }}/just-speak-model
+      JUST_SPEAK_TEST_MODEL_DIR: ${{ github.workspace }}/models/ci-parakeet
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
