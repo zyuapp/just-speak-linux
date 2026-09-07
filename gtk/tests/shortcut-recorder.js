@@ -56,11 +56,23 @@ equal(capture.canSave, true, 'Releasing pre-held modifiers enables Save');
 for (const name of ['Super_L', 'Super_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R', 'Shift_L', 'Shift_R']) {
     capture.reset(); capture.arm();
     capture.press(name, 133, 0);
-    capture.press(name, 133, superMask);
-    equal(capture.candidate, '', 'Modifier is collected on release');
+    capture.press(name, 133, 0);
+    equal(capture.candidate, '', 'Modifier alone does not create a candidate');
     capture.release(name, 133);
-    equal(capture.candidate, name.toUpperCase(), `Standalone ${name}`);
-    equal(capture.canSave, true, 'Released standalone modifier can be saved');
+    equal(capture.candidate, '', `Standalone ${name} rejected`);
+    equal(capture.canSave, false, 'Released standalone modifier cannot be saved');
+    equal(Boolean(capture.error), true, 'Modifier rejection explains how to retry');
+}
+for (const name of ['Alt_L', 'Alt_R']) {
+    capture.reset(); capture.arm();
+    capture.press(name, 108, 0);
+    capture.press('F10', 76, Gdk.ModifierType.ALT_MASK);
+    equal(capture.candidate, 'ALT + F10', 'Alt with an ordinary key remains supported');
+    equal(capture.error, '', 'Valid chord clears the modifier-only guidance');
+    capture.release(name, 108);
+    equal(capture.canSave, false, 'Releasing modifier first still waits for the ordinary key');
+    capture.release('F10', 76);
+    equal(capture.canSave, true, 'Valid Alt chord can be saved after release');
 }
 capture.reset(); capture.arm();
 capture.press('Control_L', 37, 0);
@@ -68,9 +80,9 @@ capture.press('Shift_L', 50, ctrl);
 capture.release('Control_L', 37);
 capture.release('Shift_L', 50);
 equal(capture.candidate, '', 'Multiple modifiers alone are not mistaken for a standalone modifier');
-capture.press('Super_R', 134, 0);
-capture.release('Super_R', 134);
-equal(capture.candidate, 'SUPER_R', 'A new gesture works after invalid input');
+capture.press('F10', 76, 0);
+capture.release('F10', 76);
+equal(capture.candidate, 'F10', 'A new gesture works after invalid input');
 
 capture.reset(); capture.arm();
 capture.press('a', 38, 0);

@@ -26,7 +26,9 @@ Review the [installer](scripts/install-release.sh) before running it if preferre
 For supported options, download it and run `bash install-release.sh --help`.
 
 On Omarchy, click **Record shortcut**, press **F10** (or your preferred
-combination), then click **Save**. There is no shortcut name to type. Advanced
+combination), then click **Save**. Modifier-only shortcuts (such as Right Alt)
+are rejected because releasing them may fail to stop recording. Use F10 or a
+combination such as Super + F10. There is no shortcut name to type. Advanced
 users can still configure it from the command line:
 
 ```sh

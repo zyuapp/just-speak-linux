@@ -61,7 +61,7 @@ impl Config {
                 "model_dir must be an absolute path (shell ~ expansion is not supported in TOML)"
             );
         }
-        crate::shortcut::normalize(&self.shortcut)?;
+        crate::shortcut::normalize_existing(&self.shortcut)?;
         Ok(())
     }
 
@@ -155,6 +155,13 @@ mod tests {
         assert!(config.validate().is_err());
         assert!(toml::from_str::<Config>("thread_count = 4").is_err());
         assert!(toml::from_str::<Config>("num_threads = -1").is_err());
+    }
+
+    #[test]
+    fn legacy_modifier_shortcut_remains_loadable_for_replacement() {
+        let config: Config = toml::from_str("shortcut = \"ALT_R\"").unwrap();
+        assert!(config.validate().is_ok());
+        assert!(crate::shortcut::normalize(&config.shortcut).is_err());
     }
 
     #[test]

@@ -9,6 +9,15 @@ use std::{
 };
 
 pub fn normalize(value: &str) -> Result<String> {
+    normalize_inner(value, false)
+}
+
+// Existing settings must remain loadable so users can replace an old shortcut.
+pub fn normalize_existing(value: &str) -> Result<String> {
+    normalize_inner(value, true)
+}
+
+fn normalize_inner(value: &str, allow_legacy_modifiers: bool) -> Result<String> {
     ensure!(value.len() <= 128, "shortcut is too long");
     let parts: Vec<_> = value.split('+').map(str::trim).collect();
     ensure!(
@@ -20,6 +29,30 @@ pub fn normalize(value: &str) -> Result<String> {
         key.bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'),
         "shortcut key must be a Hyprland key name"
+    );
+    let modifier_key = matches!(
+        key.as_str(),
+        "SUPER_L"
+            | "SUPER_R"
+            | "CONTROL_L"
+            | "CONTROL_R"
+            | "ALT_L"
+            | "ALT_R"
+            | "SHIFT_L"
+            | "SHIFT_R"
+            | "SUPER"
+            | "CTRL"
+            | "CONTROL"
+            | "ALT"
+            | "SHIFT"
+            | "WIN"
+            | "META"
+    ) || key.starts_with("ISO_")
+        || key.starts_with("META_")
+        || key.starts_with("HYPER_");
+    ensure!(
+        allow_legacy_modifiers || !modifier_key,
+        "modifier-only shortcuts cannot reliably stop recording; use F10 or a combination such as SUPER + F10"
     );
     let mut modifiers = Vec::new();
     for part in &parts[..parts.len() - 1] {
@@ -60,7 +93,7 @@ pub fn normalize(value: &str) -> Result<String> {
                         | "PAUSE"
                         | "INSERT"
                 ),
-            "use a function key, standalone modifier, or a modifier-key combination"
+            "use a function key or a modifier-key combination"
         );
     }
     modifiers.sort_by_key(|value| match *value {
@@ -277,7 +310,7 @@ mod tests {
             normalize("ctrl + super + f12").unwrap(),
             "SUPER + CTRL + F12"
         );
-        assert_eq!(normalize("Super_R").unwrap(), "SUPER_R");
+        assert_eq!(normalize_existing("Super_R").unwrap(), "SUPER_R");
         for value in [
             "",
             "A",
@@ -289,6 +322,25 @@ mod tests {
         ] {
             assert!(normalize(value).is_err(), "{value}");
         }
+    }
+    #[test]
+    fn rejects_modifier_only_shortcuts() {
+        for key in [
+            "Super_L",
+            "Super_R",
+            "Control_L",
+            "Control_R",
+            "Alt_L",
+            "Alt_R",
+            "Shift_L",
+            "Shift_R",
+            "ALT",
+            "ISO_Level3_Shift",
+        ] {
+            assert!(normalize(key).is_err(), "{key}");
+            assert!(normalize(&format!("CTRL + {key}")).is_err(), "CTRL + {key}");
+        }
+        assert_eq!(normalize("ALT + F10").unwrap(), "ALT + F10");
     }
     #[test]
     fn never_steals_voxtype_or_another_apps_binding() {

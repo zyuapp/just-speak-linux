@@ -1,5 +1,19 @@
 # Version 0.2 release verification
 
+## Modifier-only shortcut rejection (0.2.4)
+
+The recorder and backend reject new modifier-only bindings, including Right Alt
+and combinations containing only modifiers. Older configurations remain loadable
+so users can replace their shortcut without losing access to settings.
+
+All 57 ordinary Rust tests and the synthetic GTK capture sequences passed locally,
+including rejection, retry, valid Alt chords, and legacy configuration loading.
+Strict Clippy and formatting checks passed. Local GTK window lifecycle checks
+require unavailable Xvfb; the release workflow now runs those Ubuntu GTK checks
+alongside its existing ABI and real-model acceptance checks before publishing
+tagged releases. Publication is asynchronous; these local results do not claim
+that the portable build has completed.
+
 ## Upgrade interface refresh (0.2.3)
 
 A live 0.2.1 popup remained stale after a successful OTA file switch and plugin

@@ -31,13 +31,12 @@ export class ShortcutCapture {
     reset() {
         this.phase = 'waiting';
         this.held = new Map();
-        this.modifierOnly = null;
         this.candidate = '';
         this.error = '';
         this.activeModifiers = 0;
     }
     arm() { if (this.phase === 'waiting') this.phase = 'recording'; }
-    close() { this.phase = 'closed'; this.held.clear(); this.modifierOnly = null; this.activeModifiers = 0; }
+    close() { this.phase = 'closed'; this.held.clear(); this.activeModifiers = 0; }
     get keysDown() { return this.held.size > 0 || this.activeModifiers !== 0; }
     get canSave() { return this.phase === 'preview' && !this.keysDown; }
     heldModifierMask() { return [...this.held.values()].reduce((state, name) => state | modifierMask(name), 0); }
@@ -49,14 +48,11 @@ export class ShortcutCapture {
         this.hold(name, code, state);
         if (this.phase === 'preview') return null;
         if (modifiers.has(name)) {
-            // A standalone modifier must have been the only key in this gesture.
-            this.modifierOnly = this.held.size === 1 && this.activeModifiers === modifierMask(name)
-                && this.modifierOnly !== false ? code : false;
+            this.error = 'Modifier-only shortcuts cannot reliably stop recording. Add a key such as F10.';
             return null;
         }
-        this.modifierOnly = false;
         if (/^(ISO_|Meta_|Hyper_)/.test(name)) {
-            this.error = 'Use Super, Control, Alt, or Shift, or a function key.';
+            this.error = 'Use a function key or a combination such as Super + F10.';
             return null;
         }
         const active = new Set(masks.filter(([, mask]) => (state & mask) !== 0).map(([name]) => name));
@@ -77,18 +73,10 @@ export class ShortcutCapture {
     }
     release(releasedName, code, state = this.activeModifiers) {
         const name = this.held.get(code) || releasedName;
-        const wasHeld = this.held.has(code);
         this.held.delete(code);
         // GDK's release event may still contain the modifier being released.
         // Keep the bit only if another known key of the same kind stays down.
         this.activeModifiers = ((state & chordMask) & ~modifierMask(name)) | this.heldModifierMask();
-        if (wasHeld && this.phase === 'recording' && this.modifierOnly === code && !this.keysDown) {
-            this.candidate = name.toUpperCase();
-            this.phase = 'preview';
-            this.error = '';
-            return 'preview';
-        }
-        if (!this.keysDown && this.phase === 'recording') this.modifierOnly = null;
         return null;
     }
 }
@@ -282,7 +270,7 @@ export class ShortcutRecorder {
         this.message.label = this.pendingClose ? 'Release all keys to close the recorder, or switch to another window to cancel. Desktop shortcuts remain suspended while you release the keys here.'
             : this.saving ? 'Saving shortcut…'
             : preview ? (this.capture.keysDown ? 'Release all keys to continue.' : 'Shortcut captured. Click Save or press Enter to use it, or record again.')
-                : 'Press a function key, a key combination, or press and release one modifier. Desktop shortcuts are suspended while this window stays focused.';
+                : 'Press a function key or a modifier with another key, such as Super + F10. Desktop shortcuts are suspended while this window stays focused.';
         this.error.label = this.capture.error;
         this.error.visible = Boolean(this.capture.error);
         this.saveButton.sensitive = this.capture.canSave && !this.saving && !this.pendingClose;
