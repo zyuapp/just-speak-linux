@@ -1,5 +1,39 @@
 # Version 0.2 release verification
 
+## Inline Omarchy shortcut recorder (0.2.8)
+
+The Omarchy popup now captures, previews, saves and cancels shortcuts inline.
+Quickshell's compositor-granted ShortcutInhibitor protects the existing panel;
+a GJS helper reads the keyboard layout without creating a GTK window. Save
+still uses the existing backend conflict checks.
+
+Local verification passed all 58 ordinary Rust tests, strict Clippy, formatting,
+the existing GTK capture tests, the keymap translation fixtures, and all 26
+QtTest results for inline capture. Cases include modifier combinations and
+release order, pre-held and duplicate modifiers, repeats, shifted punctuation,
+invalid keys, AltGr/keypad rejection, stale replies, focus interruption,
+preview preservation, save failures, keys pressed during saves, and keyboard
+navigation. The release workflow runs the new capture/keymap tests as well.
+
+An isolated copy of the actual Omarchy panel passed capability gates, inline
+conflict/retry/save routing, Escape, and outside-dismissal release gating. The
+live Hyprland variant additionally verified real shortcut inhibition, focus
+loss/recovery, hardware-code translation, and real F35/F34 events delivered
+through a virtual keyboard. Those keys were confirmed unbound before injection;
+all saves used a fake backend. The live test caught and fixed translation of
+function keys from a virtual keyboard whose keymap differs from a new client's.
+A captured image confirmed the recorder controls remain inside the popup.
+
+Separate hidden fixtures passed denied protection, malformed keymap output,
+a hung keymap helper followed by retry, and the real 30-second capture timeout
+while a key was held. They did not modify user shortcuts, microphone input,
+clipboard contents or running services. GNOME behavior is outside this change.
+Layout-ambiguous character keys fail with an explanation rather than guessing;
+AltGr and numeric-keypad shortcuts are explicitly unsupported in this recorder.
+
+Publication remains subject to the tagged release workflow's Ubuntu GTK,
+portable ABI, real-model and older-client OTA acceptance checks.
+
 ## Modifier-only shortcut rejection (0.2.4)
 
 The recorder and backend reject new modifier-only bindings, including Right Alt

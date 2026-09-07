@@ -16,7 +16,7 @@ Ui.BarWidget {
         menuState.error = "";
         menuState.refresh();
     }
-    function close(): void { opened = false; }
+    function close(): void { if (dictationMenu.requestClose()) opened = false; }
     function toggle(): void { opened ? close() : open(); }
     function closeForPopoutSwitch(): void { popoutSwitchClosing = true; close(); }
     function refresh(): void { menuState.refresh(); }
@@ -57,6 +57,7 @@ Ui.BarWidget {
     }
 
     DictationMenu {
+        id: dictationMenu
         anchorItem: button
         bar: root.bar
         owner: root

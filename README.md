@@ -25,8 +25,8 @@ Omarchy. It does not install system dependencies or silently replace your shortc
 Review the [installer](scripts/install-release.sh) before running it if preferred.
 For supported options, download it and run `bash install-release.sh --help`.
 
-On Omarchy, click **Record shortcut**, press **F10** (or your preferred
-combination), then click **Save**. Modifier-only shortcuts (such as Right Alt)
+On Omarchy, click **Record shortcut** in the bar popup, press **F10** (or your
+preferred combination), then click **Save**. Modifier-only shortcuts (such as Right Alt)
 are rejected because releasing them may fail to stop recording. Use F10 or a
 combination such as Super + F10. There is no shortcut name to type. Advanced
 users can still configure it from the command line:
@@ -36,8 +36,9 @@ users can still configure it from the command line:
 ```
 
 The editor checks existing bindings, backs up your configuration, and rejects
-conflicts. Omarchy's existing F9 Voxtype shortcut stays intact. On GNOME, use the
-window's Start/Stop controls and manual clipboard paste while native integration
+conflicts. Capture, preview, Save and Cancel stay in the Omarchy popup.
+Desktop shortcuts are protected until held keys are released. Omarchy's existing
+F9 Voxtype shortcut stays intact. On GNOME, use the window's Start/Stop controls and manual clipboard paste while native integration
 is being developed.
 
 Requirements: Linux x86_64, a user systemd session, PipeWire (`pw-record`,

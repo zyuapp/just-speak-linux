@@ -9,8 +9,16 @@ Ui.KeyboardPanel {
     required property MenuModel menuModel
     required property UpdateModel updateModel
     property var deferredArguments: []
-    readonly property bool editable: menuModel.canEdit && !updateModel.installing
-    focusTarget: content
+    readonly property bool editable: menuModel.canEdit && !updateModel.installing && !shortcutRecorder.editing
+    readonly property bool recordingShortcut: shortcutRecorder.editing
+
+    function requestClose(): bool { return shortcutRecorder.requestPanelClose(); }
+    function close(): void {
+        if (!requestClose()) return;
+        if (owner && "close" in owner) owner.close();
+        else open = false;
+    }
+    focusTarget: recordingShortcut ? shortcutRecorder : content
     contentWidth: root.fittedContentWidth(Style.space(410))
     contentHeight: root.fittedContentHeight(column.implicitHeight, Style.space(720))
 
@@ -36,8 +44,10 @@ Ui.KeyboardPanel {
         id: content
         anchors.fill: parent
         focus: true
+        Keys.forwardTo: shortcutRecorder.editing ? [shortcutRecorder] : []
         Keys.onEscapePressed: event => {
-            if (!microphone.popupOpen) root.close();
+            if (shortcutRecorder.editing) shortcutRecorder.capture.cancel();
+            else if (!microphone.popupOpen) root.close();
             event.accepted = true;
         }
 
@@ -80,7 +90,7 @@ Ui.KeyboardPanel {
                     Ui.Button {
                         id: refreshButton
                         text: root.menuModel.loading ? "Loading…" : "Refresh"
-                        enabled: !root.menuModel.loading && !root.menuModel.busy
+                        enabled: !root.recordingShortcut && !root.menuModel.loading && !root.menuModel.busy
                         focusable: true
                         onClicked: { root.menuModel.error = ""; root.menuModel.refresh(); }
                     }
@@ -107,7 +117,7 @@ Ui.KeyboardPanel {
                               : root.feed.phase === "recording" ? "Finish dictation" : "Start dictation"
                         focusable: true
                         bordered: true
-                        enabled: !root.menuModel.busy && !root.updateModel.installing && (root.feed.phase === "disconnected"
+                        enabled: !root.recordingShortcut && !root.menuModel.busy && !root.updateModel.installing && (root.feed.phase === "disconnected"
                                  || root.feed.phase === "recording" || (root.feed.modelReady && ["idle", "error"].includes(root.feed.phase)))
                         opacity: enabled ? 1 : 0.45
                         onClicked: {
@@ -118,7 +128,7 @@ Ui.KeyboardPanel {
                     Ui.Button {
                         text: "Cancel"
                         visible: root.feed.canCancel
-                        enabled: !root.menuModel.busy
+                        enabled: !root.recordingShortcut && !root.menuModel.busy
                         focusable: true
                         onClicked: root.menuModel.run(["cancel"], "Canceled")
                     }
@@ -260,38 +270,13 @@ Ui.KeyboardPanel {
                     color: "#e7ae83"
                 }
 
-                Column {
+                ShortcutRecorder {
+                    id: shortcutRecorder
                     width: parent.width
-                    spacing: Style.space(5)
-                    Text {
-                        text: "Hold-to-talk shortcut"
-                        textFormat: Text.PlainText
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        color: Color.popups.text
-                    }
-                    Row {
-                        width: parent.width
-                        spacing: Style.space(6)
-                        Text {
-                            width: parent.width - recordShortcut.implicitWidth - parent.spacing
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: root.menuModel.data.settings.shortcut || root.feed.shortcut
-                            textFormat: Text.PlainText
-                            font.family: Style.font.family
-                            font.pixelSize: Style.font.body
-                            color: Color.popups.text
-                            elide: Text.ElideRight
-                        }
-                        Ui.Button {
-                            id: recordShortcut
-                            text: "Record shortcut…"
-                            focusable: true
-                            enabled: root.editable && root.menuModel.data.desktop?.shortcut_editing === true
-                            opacity: enabled ? 1 : 0.45
-                            onClicked: root.outsideAction(["window", "--record-shortcut"])
-                        }
-                    }
+                    panel: root
+                    menuModel: root.menuModel
+                    available: root.menuModel.canEdit && !root.updateModel.installing && root.menuModel.data.desktop?.shortcut_editing === true
+                    onClosePanelRequested: root.close()
                 }
 
                 Repeater {
@@ -356,14 +341,14 @@ Ui.KeyboardPanel {
                     spacing: Style.space(6)
                     Ui.Button {
                         text: root.updateModel.checking ? "Checking…" : "Check for updates"
-                        enabled: !root.updateModel.checking && !root.updateModel.installing
+                        enabled: !root.recordingShortcut && !root.updateModel.checking && !root.updateModel.installing
                         focusable: true
                         onClicked: root.updateModel.check(true)
                     }
                     Ui.Button {
                         text: root.updateModel.installing ? "Installing…" : "Install update"
                         visible: root.updateModel.available || root.updateModel.installing
-                        enabled: !root.menuModel.busy && !root.menuModel.recording && !root.updateModel.installing && !root.updateModel.checking
+                        enabled: !root.recordingShortcut && !root.menuModel.busy && !root.menuModel.recording && !root.updateModel.installing && !root.updateModel.checking
                         focusable: true
                         onClicked: root.updateModel.install()
                     }
@@ -384,7 +369,7 @@ Ui.KeyboardPanel {
                     Ui.Button {
                         id: restartButton
                         text: "Restart"
-                        enabled: !root.menuModel.busy && !root.menuModel.recording && !root.updateModel.installing
+                        enabled: !root.recordingShortcut && !root.menuModel.busy && !root.menuModel.recording && !root.updateModel.installing
                         opacity: enabled ? 1 : 0.4
                         focusable: true
                         onClicked: root.menuModel.run(["restart"], "Restarting JustSpeak")
@@ -392,7 +377,7 @@ Ui.KeyboardPanel {
                     Ui.Button {
                         id: quitButton
                         text: "Quit"
-                        enabled: !root.menuModel.busy && !root.updateModel.installing && root.feed.phase !== "disconnected"
+                        enabled: !root.recordingShortcut && !root.menuModel.busy && !root.updateModel.installing && root.feed.phase !== "disconnected"
                         opacity: enabled ? 1 : 0.4
                         focusable: true
                         onClicked: { root.menuModel.run(["quit"], "JustSpeak stopped"); root.close(); }

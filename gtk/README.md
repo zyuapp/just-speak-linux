@@ -21,7 +21,10 @@ Start/Finish stays visible and results go to the clipboard. Shortcut editing and
 automatic paste are disabled according to the service's desktop capabilities;
 GNOME behavior has not been verified.
 
-Choose **Record shortcut…** to press a shortcut instead of typing its name.
+In the desktop window, choose **Record shortcut…** to press a shortcut instead of typing its name.
+The Omarchy bar records inline in its popup using Quickshell shortcut inhibition;
+it uses the headless `shortcut-keymap.js` helper for layout translation and does
+not launch this desktop window.
 `just-speak window --record-shortcut` opens the same recorder, including when
 the desktop window is already running. The dialog waits for compositor shortcut
 inhibition and focus before accepting input. It supports function keys,
