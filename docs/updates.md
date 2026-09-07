@@ -108,3 +108,17 @@ A local build inherits its host's ABI requirements. For example, an Arch-built b
 - `SHA256SUMS`
 
 The speech model is not bundled in the binary archive. Its explicit downloader verifies the pinned upstream archive separately and preserves its attribution information.
+
+## Omarchy popup refresh
+
+Starting with 0.2.2, release packages give every JustSpeak QML component a
+release-specific filename, including the popup's nested components. The plugin
+manifest points to the matching versioned widget. A plugin rescan therefore
+loads new component URLs instead of reusing code cached under stable filenames.
+This applies to both OTA updates and release-installer upgrades without
+restarting the whole Omarchy shell. Original flat files remain in the package
+so existing 0.2.0 and 0.2.1 updaters can install the fix directly.
+
+The release workflow checks the packaged component graph for stale type names
+and preserves the paths expected by older updaters. Merely checking the service
+version or the files on disk does not verify a running popup's code.

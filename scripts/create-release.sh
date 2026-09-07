@@ -11,6 +11,8 @@ python3 - "$project_dir" "${1:-$project_dir/dist}" <<'PY'
 import gzip, hashlib, io, json, os, pathlib, re, shutil, subprocess, sys, tarfile, tempfile
 
 project = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(project / 'scripts'))
+from package_ui import stage_ui
 output = pathlib.Path(sys.argv[2]).absolute()
 package = (project / 'Cargo.toml').read_text().split('[package]', 1)[1].split('\n[', 1)[0]
 version = re.search(r'^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*$', package, re.M).group(1)
@@ -45,9 +47,7 @@ with tempfile.TemporaryDirectory(prefix='just-speak-release-') as temporary:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
     copy(binary, 'bin/just-speak')
-    for source in sorted((project / 'ui').iterdir()):
-        if source.is_file() and (source.suffix == '.qml' or source.name == 'manifest.json'):
-            copy(source, 'share/just-speak/ui/' + source.name)
+    stage_ui(project / 'ui', stage / 'share/just-speak/ui', version)
     for source in sorted((project / 'gtk').iterdir()):
         if source.is_file() and source.suffix in ('.js', '.css', '.json'):
             copy(source, 'share/just-speak/gtk/' + source.name)
