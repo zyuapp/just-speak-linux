@@ -15,6 +15,21 @@ readiness. Update service output goes to the journal so closing the originating
 popup cannot break its output pipe. The refresh command can be retried without
 reinstalling if a locked session or another error prevents the shell restart.
 
+The combined release preserves the separately completed capture-start fix.
+All 55 ordinary Rust tests and all eight real-model smoke groups passed locally.
+A CLI fixture confirmed that only the matching installation's plugin is
+refreshed. A real, harmless transient-unit test confirmed that journal output
+survives loss of the updater's launcher and collectors, while pipe output fails.
+The smoke suite now waits for synthetic audio readiness before exercising
+inference cancellation, removing a scheduling race found in CI.
+
+The final [portable build](https://github.com/zyuapp/just-speak-linux/actions/runs/34152272756)
+passed for `500792cb77b000cd3c397f3b459c5f17e5d884e3`, including real-model
+acceptance. Every asset checksum and all 77 source files matched that commit.
+[Version 0.2.3](https://github.com/zyuapp/just-speak-linux/releases/tag/v0.2.3)
+was published. At the user's request, it was not installed and the app was not
+restarted; the user is testing the OTA transition themselves.
+
 ## Shortcut recorder (0.2.1)
 
 The shortcut recorder replaces free-text editing in both interfaces. The GTK
