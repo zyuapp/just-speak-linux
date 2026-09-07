@@ -19,6 +19,15 @@ granted inhibition, unbound F35 was captured, holding unbound F34 disabled Save,
 and the final release and synthetic save restored inhibition. These checks do
 not record microphone input or alter the user's existing bindings.
 
+An isolated single-instance launch check uses a synthetic backend: a second
+request returns promptly and opens the recorder in the original GTK process.
+Action delivery avoids retaining a GJS command-line object, which otherwise
+delayed the launching process until garbage collection. Recorder creation waits
+for the main window to gain focus so its initial activation cannot cancel the
+dialog. Ubuntu's GTK 4.6 also required explicitly clearing the transient parent
+before destroying the dialog; a debugger trace confirmed the stale-parent
+cleanup path during GJS shutdown.
+
 Verification is performed with isolated fixtures wherever recording, clipboard,
 or desktop mutations would otherwise affect the user's session. GNOME/Ubuntu
 interactive desktop behavior is not included in the Omarchy verification scope.

@@ -337,6 +337,10 @@ export class ShortcutRecorder {
             if (this.inhibitRequested) this.surface.restore_system_shortcuts();
         }
         this.inhibitRequested = false;
+        // Gtk 4.6 can retain a destroyed child until GJS GC. Detach its transient
+        // parent now so later disposal cannot disconnect signals from a parent
+        // that has already been finalized.
+        this.window.set_transient_for(null);
         this.window.destroy();
         this.onClosed?.(message);
     }

@@ -9,8 +9,8 @@ import {ShortcutRecorder} from './shortcut-recorder.js';
 const visibleSmoke = ARGV.includes('--smoke-test-visible');
 const smoke = visibleSmoke || ARGV.includes('--smoke-test');
 const app = new Gtk.Application({application_id: smoke ? 'io.github.zyuapp.JustSpeak.Smoke' : 'io.github.zyuapp.JustSpeak',
-    // Command-line requests also reach an already-running window over D-Bus.
-    flags: smoke ? Gio.ApplicationFlags.NON_UNIQUE : Gio.ApplicationFlags.HANDLES_COMMAND_LINE});
+    // FLAGS_NONE is compatible with Ubuntu 22.04's GLib 2.72.
+    flags: smoke ? Gio.ApplicationFlags.NON_UNIQUE : Gio.ApplicationFlags.FLAGS_NONE});
 app.add_main_option('record-shortcut', 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
     'Open the shortcut recorder', null);
 const backend = new Backend(smoke);
@@ -192,6 +192,9 @@ function openShortcutRecorder() {
             : 'Start JustSpeak and finish any dictation before changing the shortcut.');
         return;
     }
+    // A newly mapped parent can gain focus after its child and immediately
+    // cancel the recorder. Wait for the parent's initial activation to settle.
+    if (!window.is_active) { pendingRecorder = true; return; }
     showNotice('');
     recorder = new ShortcutRecorder({parent: window,
         current: metadata.settings.shortcut || status.shortcut,
@@ -269,6 +272,9 @@ async function installUpdate() {
 
 function buildWindow(application) {
     window = new Gtk.ApplicationWindow({application, title: 'JustSpeak', default_width: 520, default_height: 760});
+    window.connect('notify::is-active', () => {
+        if (window.is_active && pendingRecorder && !polling) { pendingRecorder = false; openShortcutRecorder(); }
+    });
     const header = new Gtk.HeaderBar();
     header.set_title_widget(label('JustSpeak'));
     header.pack_end(button('Refresh', async () => { await poll(); await refreshMenu(); }));
@@ -350,7 +356,7 @@ function buildWindow(application) {
 }
 
 app.connect('activate', () => {
-    if (window) { window.present(); void poll(); return; }
+    if (window) { if (recorder) recorder.present(); else window.present(); void poll(); return; }
     buildWindow(app);
     if (smoke) {
         try {
@@ -382,10 +388,16 @@ app.connect('activate', () => {
     void poll().catch(showError);
     interval = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => { void poll().catch(showError); return GLib.SOURCE_CONTINUE; });
 });
-app.connect('command-line', (_application, commandLine) => {
-    pendingRecorder = pendingRecorder || commandLine.get_options_dict().contains('record-shortcut');
-    app.activate();
-    return 0;
+const recordAction = new Gio.SimpleAction({name: 'record-shortcut'});
+recordAction.connect('activate', () => { pendingRecorder = true; app.activate(); });
+app.add_action(recordAction);
+app.connect('handle-local-options', (_application, options) => {
+    if (!options.contains('record-shortcut')) return -1;
+    // Actions deliver to the primary instance and return immediately. Retaining
+    // GApplicationCommandLine in GJS can otherwise make launchers wait for GC.
+    app.register(null);
+    app.activate_action('record-shortcut', null);
+    return app.get_is_remote() ? 0 : -1;
 });
 app.connect('shutdown', () => {
     if (recorder) recorder.close('', true);

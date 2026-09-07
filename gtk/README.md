@@ -69,4 +69,4 @@ is fake and cannot change configuration or start dictation.
 API references: [GTK shortcut inhibition](https://docs.gtk.org/gdk4/method.Toplevel.inhibit_system_shortcuts.html),
 [inhibition confirmation](https://docs.gtk.org/gdk4/property.Toplevel.shortcuts-inhibited.html),
 [key translation](https://docs.gtk.org/gdk4/method.Display.translate_key.html),
-and [single-instance command-line delivery](https://docs.gtk.org/gio/signal.Application.command-line.html).
+and [local options and single-instance action delivery](https://docs.gtk.org/gio/signal.Application.handle-local-options.html).

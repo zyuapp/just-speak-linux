@@ -34,6 +34,7 @@ function protectedFixture(recorder) {
     const realWindow = recorder.window;
     const fixture = {restored: 0, navigation: []};
     recorder.window = {is_active: true, destroy: () => realWindow.destroy(),
+        set_transient_for: value => realWindow.set_transient_for(value),
         child_focus: direction => { fixture.navigation.push(direction); return true; }, get_focus: () => null};
     recorder.surface = {shortcuts_inhibited: true, restore_system_shortcuts() { fixture.restored++; }};
     recorder.inhibitRequested = true;
