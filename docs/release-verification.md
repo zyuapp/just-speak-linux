@@ -1,5 +1,21 @@
 # Version 0.2 release verification
 
+## Lifecycle and error recovery (0.2.11)
+
+The [workflow review](architecture-review.md) records the reproduced failures,
+fixes and remaining architecture work. Local verification passed 66 ordinary
+Rust tests, strict Clippy, formatting, real-model dictation and private PipeWire
+checks. Actual GTK/CLI/daemon lifecycle workflows passed on Wayland and X11;
+GTK widget regressions and 34 Omarchy popup workflow stages passed with isolated
+state and fake desktop helpers. Settings failure/retry, shutdown completion,
+cancel cleanup, recorder failure and update failure/retry are covered.
+
+The release workflow now includes the isolated CLI lifecycle and real GTK
+window/CLI/daemon checks alongside existing GTK, Ubuntu ABI, real-model and
+published-updater compatibility gates. Publication is gated on that workflow;
+local checks alone do not verify the portable release artifact. No physical
+microphone/paste or GNOME acceptance is claimed by this pass.
+
 ## Installed shortcut lookup (0.2.10)
 
 The 0.2.8/0.2.9 popup could not locate its keymap helper after Omarchy loaded the

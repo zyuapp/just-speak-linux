@@ -51,6 +51,7 @@ jobs:
           G_DEBUG: fatal-criticals
         run: |
           gjs -m gtk/tests/shortcut-keymap.js
+          gjs -m gtk/tests/lifecycle.js
           QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME= QT_STYLE_OVERRIDE=Fusion /usr/lib/qt6/bin/qmltestrunner -input ui/tests
           gjs -m gtk/tests/shortcut-recorder.js
           timeout 30s xvfb-run -a dbus-run-session -- gjs -m gtk/main.js --smoke-test
@@ -63,6 +64,13 @@ jobs:
           cargo clippy --locked --all-targets -- -D warnings
           cargo build --release --locked
           python3 scripts/test-shortcut-resolver.py --binary target/release/just-speak
+      - name: Exercise CLI and GTK lifecycle with the release binary
+        env:
+          G_DEBUG: fatal-criticals
+        run: |
+          timeout 90s python3 scripts/test-lifecycle.py --binary target/release/just-speak
+          # The window fixture creates its own private session bus and service manager.
+          timeout 120s xvfb-run -a python3 scripts/test-window-workflow.py --backend x11 --binary target/release/just-speak
       - name: Verify Ubuntu 22.04 ABI baseline
         run: |
           python3 - <<'PY'

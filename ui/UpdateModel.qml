@@ -15,6 +15,7 @@ Scope {
     property string error: ""
     property string diagnostics: ""
     property string notice: ""
+    property bool checkTimedOut: false
     property real lastCheck: 0
     readonly property string label: {
         if (installing) return "Installing update… JustSpeak and the Omarchy bar will reload.";
@@ -31,12 +32,12 @@ Scope {
         if (!feed.executableReady || checking || installing) return;
         if (!manual && Date.now() - lastCheck < 6 * 60 * 60 * 1000) return;
         checking = true;
+        checkTimedOut = false;
         lastCheck = Date.now();
         diagnostics = "";
         error = "";
         notice = "";
-        checker.command = [feed.executable, "update", "check", "--json"];
-        checker.running = true;
+        checker.startCommand([feed.executable, "update", "check", "--json"]);
         checkTimeout.restart();
     }
 
@@ -45,26 +46,31 @@ Scope {
         installing = true;
         diagnostics = "";
         error = "";
-        installer.command = [feed.executable, "update", "install"];
-        installer.running = true;
+        notice = "";
+        installer.startCommand([feed.executable, "update", "install"]);
     }
 
-    Process {
+    CommandProcess {
         id: checker
+        onFailedToStart: root.diagnostics = "Could not start JustSpeak. Reopen the app and try again."
         stdout: StdioCollector { id: response }
         stderr: SplitParser {
             onRead: line => root.diagnostics = (root.diagnostics + line + "\n").slice(0, 1200)
         }
-        onExited: exitCode => {
+        onFinished: exitCode => {
             checkTimeout.stop();
             root.checking = false;
+            if (root.checkTimedOut) return;
             if (exitCode !== 0) {
                 root.error = root.diagnostics.trim() || "Could not check for updates. Try again when you are online.";
                 return;
             }
             try {
                 const result = JSON.parse(response.text);
-                if (typeof result.available !== "boolean") throw new Error("Invalid update response");
+                if (typeof result.available !== "boolean" || typeof result.latest_version !== "string"
+                    || (result.available && !result.latest_version)
+                    || (result.release_url !== undefined && typeof result.release_url !== "string"))
+                    throw new Error("Invalid update response");
                 root.available = result.available;
                 root.latestVersion = result.latest_version || "";
                 root.releaseUrl = result.release_url || "";
@@ -75,13 +81,14 @@ Scope {
         }
     }
 
-    Process {
+    CommandProcess {
         id: installer
+        onFailedToStart: root.diagnostics = "Could not start JustSpeak. Reopen the app and try again."
         stdout: SplitParser { onRead: line => {} }
         stderr: SplitParser {
             onRead: line => root.diagnostics = (root.diagnostics + line + "\n").slice(0, 1200)
         }
-        onExited: exitCode => {
+        onFinished: exitCode => {
             root.installing = false;
             if (exitCode === 0) {
                 root.available = false;
@@ -97,8 +104,8 @@ Scope {
         id: checkTimeout
         interval: 45000
         onTriggered: {
+            root.checkTimedOut = true;
             checker.running = false;
-            root.checking = false;
             root.error = "Checking for updates timed out. Try again later.";
         }
     }

@@ -33,12 +33,19 @@ if name == "pw-record":
     args = sys.argv[1:]
     for option, value in [("--rate", "16000"), ("--channels", "1"), ("--format", "s16")]:
         assert args[args.index(option) + 1] == value
-    signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
+    def stop_recording(*_):
+        event("recording_stop_pending")
+        while (root / "hold-recorder-stop").exists():
+            time.sleep(0.01)
+        sys.exit(0)
+    signal.signal(signal.SIGINT, stop_recording)
     shutil.copyfile((root / "fixture-path").read_text(), args[-1])
     try:
         event("recording_started")
         while True:
-            signal.pause()
+            if (root / "exit-recorder").exists():
+                sys.exit("Synthetic microphone disconnected")
+            time.sleep(0.01)
     finally:
         event("recording_stopped")
 elif name == "wl-copy":
@@ -112,7 +119,7 @@ def stop_process(process):
             process.wait()
 
 
-def smoke(binary, model, root):
+def smoke(binary, model, root, shutdown="signal"):
     fixture = model / "test_wavs/0.wav"
     assert fixture.is_file(), f"missing speech fixture: {fixture}"
     for directory in ["bin", "config/just-speak", "runtime", "data", "cache", "tmp", "state"]:
@@ -228,12 +235,45 @@ def smoke(binary, model, root):
             assert count("dispatch") == 1 and count("copy_started") == 1
             print("PASS cancellation/status survive invalid edited config; idle stop/cancel are harmless", flush=True)
 
+            stop_gate = root / "hold-recorder-stop"
+            start_ready()
+            time.sleep(0.1)
+            stop_gate.touch()
+            cli("cancel")
+            assert status()["phase"] == "canceling"
+            rejected = cli("start", check=False)
+            assert rejected.returncode != 0
+            assert status()["phase"] == "canceling", "rejected Start destroyed cleanup state"
+            stop_gate.unlink()
+            wait_for(idle, "microphone cancellation completion")
+            wait_for(clean_recordings, "microphone cancellation cleanup")
+            assert count("dispatch") == 1 and count("copy_started") == 1
+            print("PASS cancellation stays busy until microphone stops; early Start preserves cleanup state", flush=True)
+
+            start_ready()
+            time.sleep(0.1)
+            assert status()["phase"] == "recording"
+            (root / "exit-recorder").touch()
+            failed = wait_for(lambda: (state := status())["phase"] == "error" and state,
+                              "automatic microphone failure detection", timeout=5)
+            assert "Synthetic microphone disconnected" in failed["message"], failed
+            assert "stopped unexpectedly" in failed["message"], failed
+            wait_for(clean_recordings, "failed microphone recording cleanup")
+            assert count("dispatch") == 1 and count("copy_started") == 1
+            (root / "exit-recorder").unlink()
+            start_ready()
+            assert status()["phase"] == "recording", "microphone failure prevented retry"
+            cli("cancel")
+            wait_for(idle, "recording retry cancellation")
+            wait_for(clean_recordings, "recording retry cleanup")
+            print("PASS microphone disconnection reports an error without Stop, cleans audio, and allows retry", flush=True)
+
             (root / "fixture-path").write_text(str(long_fixture))
             start_ready()
             cli("stop")
             wait_for(lambda: status()["phase"] == "transcribing", "long-fixture transcription")
             cli("cancel")
-            assert idle()
+            wait_for(idle, "canceled transcription microphone cleanup")
             wait_for(clean_recordings, "canceled inference to release its audio")
             assert count("dispatch") == 1 and count("copy_started") == 1
             (root / "fixture-path").write_text(str(fixture))
@@ -248,7 +288,10 @@ def smoke(binary, model, root):
             assert status()["phase"] == "transcribing"
             cli("cancel")
             assert time.monotonic() - started < 1.0, "clipboard helper blocked status/cancel"
-            assert idle()
+            wait_for(idle, "clipboard cancellation")
+            # Cancellation suppresses paste after the clipboard handshake. An
+            # already-started clipboard offer can still finish and replace the
+            # clipboard; this fixture records that existing commit limitation.
             gate.unlink()
             wait_for(lambda: count("copy_finished") == 2, "clipboard handshake completion")
             time.sleep(0.15)
@@ -282,7 +325,10 @@ def smoke(binary, model, root):
 
             start_ready()
             assert status()["phase"] == "recording"
-            daemon.send_signal(signal.SIGTERM)
+            if shutdown == "quit":
+                cli("quit")
+            else:
+                daemon.send_signal(signal.SIGTERM)
             assert daemon.wait(timeout=15) == 0
             assert not socket.exists() and clean_recordings(), "shutdown left socket or audio behind"
             assert count("recording_started") == count("recording_stopped"), read_jsonl(root / "events.jsonl")
@@ -301,6 +347,7 @@ def smoke(binary, model, root):
         raise
     finally:
         (root / "hold-clipboard").unlink(missing_ok=True)
+        (root / "hold-recorder-stop").unlink(missing_ok=True)
         stop_process(watcher)
         stop_process(daemon)
 
@@ -309,11 +356,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=Path("target/release/just-speak"))
     parser.add_argument("--model-dir", type=Path, required=True)
+    parser.add_argument("--shutdown", choices=["signal", "quit"], default="signal")
     args = parser.parse_args()
     binary, model = args.binary.resolve(), args.model_dir.resolve()
     assert binary.is_file(), f"build the release binary first: {binary}"
     with tempfile.TemporaryDirectory(prefix="just-speak-smoke-") as temporary:
-        smoke(binary, model, Path(temporary))
+        smoke(binary, model, Path(temporary), args.shutdown)
     print("All daemon smoke checks passed; no real desktop or microphone was accessed.")
 
 

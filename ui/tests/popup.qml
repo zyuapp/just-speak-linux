@@ -79,7 +79,11 @@ ShellRoot {
                 feed.phase = "recording"; return true;
             },
             function() { check(!recorder.available, "Dictation did not disable recording"); feed.phase = "idle"; updates.installing = true; return true; },
-            function() { check(!recorder.available, "Update did not disable recording"); updates.installing = false;
+            function() {
+                // The menu refreshes on reconnect/return to idle. Let that real
+                // response settle before installing a synthetic capability snapshot.
+                if (model.loading || model.refreshPending) return false;
+                check(!recorder.available, "Update did not disable recording"); updates.installing = false;
                 model.data = {settings:{shortcut:"CTRL + F11"},history:[],inputs:[],desktop:{shortcut_editing:false}}; return true; },
             function() { check(!recorder.available, "Unsupported desktop allowed recording");
                 model.data = {settings:{shortcut:"CTRL + F11"},history:[],inputs:[],desktop:{shortcut_editing:true}}; panel.open = true; return true; },
@@ -155,7 +159,8 @@ ShellRoot {
             function() { console.log("INLINE_PASS", compositor ? "installed plugin layout; actual Super+F11 capture and Save; focus and release gating" : "isolated UI"); panel.open = false; Qt.quit(); return true; }
         ];
         if (failure) {
-            steps = [steps[0], function() { feed.phase = "idle"; panel.open = true; begin(); return true; },
+            steps = [steps[0], function() { feed.phase = "idle"; panel.open = true; return true; },
+                function() { if (!recorder.available) return false; begin(); return true; },
                 function() {
                     if (failure === "denied") return true;
                     if (!capture.protectedInput) return false;

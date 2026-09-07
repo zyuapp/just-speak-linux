@@ -158,6 +158,17 @@ impl Recorder {
         })
     }
 
+    pub fn check_running(&mut self) -> Result<()> {
+        let child = self.child.as_mut().context("recorder already stopped")?;
+        if let Some(status) = child.try_wait()? {
+            bail!(
+                "Microphone recording stopped unexpectedly ({status}): {}",
+                self.error_output()
+            );
+        }
+        Ok(())
+    }
+
     fn error_output(&self) -> String {
         self.directory
             .as_ref()
@@ -448,5 +459,39 @@ mod tests {
         assert!(stop_child(&mut child, Duration::from_millis(20)).is_err());
         assert!(started.elapsed() < Duration::from_secs(1));
         assert!(child.try_wait().unwrap().is_some());
+    }
+
+    #[test]
+    fn detects_microphone_exit_without_waiting_for_the_user_to_stop() {
+        let directory = tempfile::tempdir().unwrap();
+        let errors = File::create(directory.path().join("pipewire.log")).unwrap();
+        let child = Command::new("sh")
+            .args([
+                "-c",
+                "read ignored; printf 'device disconnected' >&2; exit 1",
+            ])
+            .stdin(Stdio::piped())
+            .stderr(errors)
+            .spawn()
+            .unwrap();
+        let mut recorder = Recorder {
+            child: Some(child),
+            directory: Some(directory),
+            _parent: None,
+        };
+        assert!(recorder.check_running().is_ok());
+        recorder
+            .child
+            .as_mut()
+            .unwrap()
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"\n")
+            .unwrap();
+        recorder.child.as_mut().unwrap().wait().unwrap();
+        let error = recorder.check_running().unwrap_err().to_string();
+        assert!(error.contains("stopped unexpectedly"));
+        assert!(error.contains("device disconnected"));
     }
 }

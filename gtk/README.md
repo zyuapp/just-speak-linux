@@ -7,7 +7,10 @@ Run `just-speak window` after installation, or `gjs -m gtk/main.js` from a
 checkout. `JUST_SPEAK_BIN` can select a development binary; otherwise the window
 prefers `~/.local/bin/just-speak` and then searches PATH. Closing the window leaves
 the dictation service running. Reopening the launcher activates the existing
-window when it is still running.
+window when it is still running. Opening a new window starts a stopped service.
+**Quit JustSpeak** waits for service cleanup and then closes the window; Quit
+from the bar also closes an open window through its GApplication action. The
+bar icon disappears while stopped and returns when JustSpeak starts again.
 
 When no model is installed, the window offers a one-time download with the size
 and source shown before starting. `just-speak model setup` asks the service to
@@ -24,7 +27,9 @@ transcript text in command arguments. History labels display plain text.
 On Hyprland, manual recording and history paste hide the window briefly before
 the service captures the target application. Finish through the configured
 shortcut or reopen JustSpeak. On desktops without automatic paste, manual
-Start/Finish stays visible and results go to the clipboard. Shortcut editing and
+Start/Finish stays visible and results go to the clipboard. Turning off
+**Paste automatically** keeps those controls visible on Hyprland as well.
+Shortcut editing and
 automatic paste are disabled according to the service's desktop capabilities;
 GNOME behavior has not been verified.
 
@@ -59,6 +64,11 @@ unverified and remains disabled by the service's capability response.
 
 `gjs -m gtk/main.js --smoke-test` constructs the window without showing it,
 exercises synthetic history/settings and desktop capability gates, and exits.
+It also drives the actual switch, microphone, dictation and update controls
+against a fake backend to check failure rollback, retry, pending-action locks,
+startup shortcut requests and stale responses. A failed refresh is displayed
+separately from an acknowledged save, and failed changes restore the last
+confirmed value immediately.
 It never records, uses the clipboard, changes settings, mutes audio, or checks
 for updates. GTK still needs a display connection to initialize.
 
@@ -75,11 +85,22 @@ real model automatically. It never downloads or accesses desktop services.
 Additional checks:
 
 ```sh
+make check-window
 gjs -m gtk/tests/shortcut-recorder.js
+gjs -m gtk/tests/lifecycle.js
 xvfb-run -a dbus-run-session -- gjs -m gtk/tests/shortcut-recorder-window.js
 ```
 
-The first test covers key sequences without a display. The second constructs
+`make check-window` includes the widget checks and
+`scripts/test-window-workflow.py`, which opens the actual window with a real
+CLI and daemon on a private session bus. It checks automatic service startup,
+close/reopen, Restart, external Quit, model setup surviving window close, and
+Quit during setup. Service management and downloads use local fixtures; user
+services and files are untouched. Pass `GTK_BACKEND=x11` when using X11.
+
+The shortcut test covers key sequences without a display. The lifecycle test
+checks completion ordering, failed Quit/retry and cross-window close delivery
+without a display. The window test constructs
 hidden GTK widgets and checks protection loss, conflicts, deferred cancellation
 and saves, pre-held modifiers, keyboard navigation, and timeout cleanup. Neither
 performs desktop actions. For an explicit live compositor check, first verify

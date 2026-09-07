@@ -335,7 +335,7 @@ fn control_command(command: &Commands) -> Option<Result<()>> {
         Commands::Cancel => control(Request::Cancel {}),
         Commands::Status { json } => service_status(*json),
         Commands::Watch => watch(),
-        Commands::Quit => control(Request::Quit {}),
+        Commands::Quit => quit_service(),
         Commands::Launch => user_service("start"),
         Commands::Window { record_shortcut } => open_window(*record_shortcut),
         Commands::Restart => restart_service(),
@@ -469,7 +469,12 @@ fn restart_service() -> Result<()> {
     if let Ok(response) = protocol::call(&config::socket_path()?, Request::Status {}) {
         ensure!(
             !response.status.can_cancel
-                && response.status.phase != protocol::Phase::Updating
+                && !matches!(
+                    response.status.phase,
+                    protocol::Phase::Updating
+                        | protocol::Phase::Stopping
+                        | protocol::Phase::Canceling
+                )
                 && !response
                     .status
                     .model_setup
@@ -480,46 +485,103 @@ fn restart_service() -> Result<()> {
     user_service("restart")
 }
 
+fn quit_service() -> Result<()> {
+    match control(Request::Quit {}) {
+        Ok(()) => {}
+        // Quit remains useful when only the settings window is running.
+        Err(error)
+            if error.downcast_ref::<io::Error>().is_some_and(|error| {
+                matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                )
+            }) => {}
+        Err(error) => return Err(error),
+    }
+    // GApplication routes this to the existing window, including when Quit
+    // originated in the bar. No running window is a normal case.
+    let _ = Command::new("gapplication")
+        .args(["action", "io.github.zyuapp.JustSpeak", "quit"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    Ok(())
+}
+
 fn apply_update(config: &Config, version: Option<&str>) -> Result<()> {
-    let socket = config::socket_path()?;
-    let was_running = socket.exists();
-    let mut gated = false;
-    let result = updater::install(&config.updates_repo, version, || {
-        if was_running {
-            control(Request::BeginUpdate {})?;
-            gated = true;
-        }
-        Ok(())
-    });
-    match result {
-        Ok(result) => {
-            if was_running {
-                user_service("restart")?;
-            }
-            if Command::new("systemctl")
-                .args([
-                    "--user",
-                    "is-active",
-                    "--quiet",
-                    "just-speak-overlay.service",
-                ])
-                .status()
-                .is_ok_and(|s| s.success())
-            {
-                let _ = Command::new("systemctl")
-                    .args(["--user", "restart", "just-speak-overlay.service"])
-                    .status();
-            }
-            ui_refresh::refresh().context(
-                "Update installed, but the Omarchy interface could not reload. Unlock the session if needed, then run `just-speak update refresh-ui`",
-            )?;
-            protocol::write_json(&mut io::stdout().lock(), &result)
-        }
-        Err(error) => {
-            if gated {
-                let _ = control(Request::EndUpdate {});
+    let mut gate = UpdateGate {
+        socket: config::socket_path()?,
+        active: false,
+    };
+    let result = updater::install(&config.updates_repo, version, || gate.begin())?;
+    gate.restart(|| user_service("restart"))
+        .context("Update installed, but JustSpeak could not restart. Try Restart again.")?;
+    if Command::new("systemctl")
+        .args([
+            "--user",
+            "is-active",
+            "--quiet",
+            "just-speak-overlay.service",
+        ])
+        .status()
+        .is_ok_and(|s| s.success())
+    {
+        let _ = Command::new("systemctl")
+            .args(["--user", "restart", "just-speak-overlay.service"])
+            .status();
+    }
+    ui_refresh::refresh().context(
+        "Update installed, but the Omarchy interface could not reload. Unlock the session if needed, then run `just-speak update refresh-ui`",
+    )?;
+    protocol::write_json(&mut io::stdout().lock(), &result)
+}
+
+struct UpdateGate {
+    socket: PathBuf,
+    active: bool,
+}
+
+impl UpdateGate {
+    fn begin(&mut self) -> Result<()> {
+        // Check at the point of installation: the user may have launched or
+        // quit the service while the archive was being downloaded.
+        match protocol::call(&self.socket, Request::BeginUpdate {}) {
+            Ok(response) => {
+                ensure!(
+                    response.ok,
+                    "{}",
+                    response.error.as_deref().unwrap_or("Cannot begin update")
+                );
+                self.active = true;
             }
             Err(error)
+                if error.downcast_ref::<io::Error>().is_some_and(|error| {
+                    matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                    )
+                }) => {}
+            Err(error) => return Err(error),
+        }
+        Ok(())
+    }
+
+    fn restart(&mut self, restart: impl FnOnce() -> Result<()>) -> Result<()> {
+        if self.active {
+            restart()?;
+            self.active = false;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for UpdateGate {
+    fn drop(&mut self) {
+        // A failed restart must release the old daemon's update gate too, so
+        // recording, Quit and a manual Restart remain usable after the error.
+        if self.active {
+            let _ = protocol::call(&self.socket, Request::EndUpdate {});
         }
     }
 }
@@ -737,4 +799,120 @@ fn benchmark(
         "resident inference missed the {minimum_speed:.1}× speed target ({speed:.1}× measured)"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use std::{os::unix::net::UnixListener, thread, time::Duration};
+
+    fn update_server(path: &Path, requests: Vec<(&'static str, bool)>) -> thread::JoinHandle<()> {
+        let listener = UnixListener::bind(path).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        thread::spawn(move || {
+            for (expected, ok) in requests {
+                let deadline = Instant::now() + Duration::from_secs(3);
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < deadline, "missing {expected} request");
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(error) => panic!("{error}"),
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(1)))
+                    .unwrap();
+                let request: serde_json::Value =
+                    serde_json::from_str(&protocol::read_line(&stream).unwrap()).unwrap();
+                assert_eq!(request["command"], expected);
+                protocol::write_json(
+                    &mut stream,
+                    &protocol::Response {
+                        ok,
+                        status: Status::default(),
+                        error: (!ok).then(|| "Finish dictation first".into()),
+                        data: None,
+                    },
+                )
+                .unwrap();
+            }
+        })
+    }
+
+    #[test]
+    fn failed_restart_and_install_failure_both_release_the_service_update_gate() {
+        for restart_fails in [true, false] {
+            let root = tempfile::tempdir().unwrap();
+            let socket = root.path().join("service.sock");
+            let server = update_server(&socket, vec![("begin_update", true), ("end_update", true)]);
+            let mut gate = UpdateGate {
+                socket,
+                active: false,
+            };
+            gate.begin().unwrap();
+            assert!(gate.active);
+            if restart_fails {
+                assert!(
+                    gate.restart(|| bail!("service manager unavailable"))
+                        .is_err()
+                );
+            }
+            // Also covers an installer error after BeginUpdate but before restart.
+            drop(gate);
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn successful_restart_does_not_release_a_new_daemons_unrelated_operation() {
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("service.sock");
+        let server = update_server(&socket, vec![("begin_update", true)]);
+        let mut gate = UpdateGate {
+            socket,
+            active: false,
+        };
+        gate.begin().unwrap();
+        gate.restart(|| Ok(())).unwrap();
+        assert!(!gate.active);
+        drop(gate);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn update_tolerates_a_stopped_service_but_preserves_a_busy_rejection() {
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("service.sock");
+        for stale_socket in [false, true] {
+            if stale_socket {
+                drop(UnixListener::bind(&socket).unwrap());
+            }
+            let mut gate = UpdateGate {
+                socket: socket.clone(),
+                active: false,
+            };
+            gate.begin().unwrap();
+            gate.restart(|| panic!("stopped service must stay stopped"))
+                .unwrap();
+            assert!(!gate.active);
+        }
+        std::fs::remove_file(&socket).unwrap();
+        let server = update_server(&socket, vec![("begin_update", false)]);
+        let mut gate = UpdateGate {
+            socket,
+            active: false,
+        };
+        assert!(
+            gate.begin()
+                .unwrap_err()
+                .to_string()
+                .contains("Finish dictation")
+        );
+        assert!(!gate.active);
+        drop(gate);
+        server.join().unwrap();
+    }
 }

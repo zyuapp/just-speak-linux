@@ -50,12 +50,13 @@ dependencies rather than invoking a package manager with elevated privileges.
 ## Use the app
 
 Open **JustSpeak** from your application launcher, run `just-speak window`, or
-click its Omarchy bar icon. The service keeps the speech model loaded after the
-window closes.
+click its Omarchy bar icon while running. Opening the window starts the service.
+Closing the window leaves dictation running; **Quit JustSpeak** stops dictation,
+closes the window, and removes the bar icon. Reopen JustSpeak from the launcher
+to start it again.
 
 If the speech model is missing (for example, after installing with `--no-model`),
-the window offers **Download model (~483 MB)**. Click **Start JustSpeak** first
-if the service is stopped. Setup shows download, verification, unpacking, and
+the window offers **Download model (~483 MB)**. Setup shows download, verification, unpacking, and
 loading progress; it continues when the window closes and enables dictation
 automatically when ready. A failed download offers **Retry download**. The
 Omarchy bar's **Set up speech model…** button opens the same setup screen.
@@ -86,8 +87,9 @@ just-speak update install
 ```
 
 `just-speak launch` starts the installed user service; `just-speak restart` reloads
-it when idle. `just-speak quit` stops it. The app launcher/window remains available
-to start it again.
+it when idle. `just-speak quit` cancels active dictation or model setup, waits for
+cleanup, and closes the window. Finish any application update or shortcut save
+before quitting. The application launcher remains available to start it again.
 
 ## Privacy and behavior
 
@@ -151,6 +153,17 @@ make check
 make model
 make smoke
 ```
+
+`make check` includes isolated CLI shutdown and GTK lifecycle regressions.
+With a display, `make check-window` drives the GTK controls and real
+window/CLI/daemon lifecycle using private test state and fake desktop helpers.
+Use `GTK_BACKEND=x11` for X11. On an Omarchy desktop, `make check-panel`
+exercises the popup's shortcuts, Quit, bar visibility, failed commands, timeouts
+and update retry with a fake service. These checks do not record, use the
+clipboard or change user settings. `make smoke` also exercises real-model
+inference with synthetic audio and fake paste/audio-feedback helpers.
+The [architecture review](docs/architecture-review.md) records confirmed
+failures, fixes, verification and remaining sources of interface/backend drift.
 
 The runtime builder verifies pinned downloads and assembles their redistribution
 notices. The vendored Rust linker refuses the general-purpose upstream runtime.

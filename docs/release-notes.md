@@ -1,11 +1,25 @@
-Version 0.2.10 fixes shortcut capture in the installed Omarchy popup, including
-Super + F11. The popup previously tried to launch a helper through a QML URL
-that did not point to a real file after plugin loading.
+Version 0.2.11 fixes shutdown, cancellation and error recovery across the
+JustSpeak window, Omarchy popup and background service.
 
-The JustSpeak executable now contains the keymap helper and runs it directly.
-Capture and Save are verified through the installed plugin's symlink layout,
-including real Super + F11 input. The release checks also exercise a relocated
-executable with no frontend files and invalid local settings.
+- Quit now finishes service cleanup, closes the window and removes the bar
+  icon. Opening JustSpeak starts it again. Quit also works during dictation
+  and model setup.
+- Failed preferences and microphone changes restore their previous values.
+  Slow responses no longer overwrite newer actions, and failed refreshes are
+  reported separately from successful saves.
+- Popup action failures stay visible. Commands that cannot start or time out
+  release their controls so you can retry. Failed updates also release the
+  service's update lock.
+- Cancellation waits for microphone and audio-feedback cleanup. An unexpected
+  recorder exit now reports an error instead of leaving the app listening.
+- Turning off automatic paste keeps the window's Start/Finish controls visible.
+  Shortcut requests survive startup, and short transcript lists display fully.
 
-Existing shortcuts, speech models, history and first-run model setup are
-preserved. Shortcut recording stays inline in the Omarchy popup.
+The release adds regression checks for real window/CLI/service lifecycle,
+settings rollback, delayed responses, popup errors and update retry. Local
+window workflows passed on Wayland and X11; model and audio checks use isolated
+fixtures. Physical microphone/paste acceptance and GNOME behavior are not
+claimed by these tests.
+
+Existing settings, models and transcript history are preserved. After updating,
+close and reopen an existing JustSpeak window to load the new interface.

@@ -9,6 +9,8 @@ Ui.KeyboardPanel {
     required property MenuModel menuModel
     required property UpdateModel updateModel
     property var deferredArguments: []
+    property bool outsideActionPending: false
+    property bool outsideActionStarted: false
     readonly property bool editable: menuModel.canEdit && !updateModel.installing && !shortcutRecorder.editing
     readonly property bool recordingShortcut: shortcutRecorder.editing
 
@@ -23,13 +25,31 @@ Ui.KeyboardPanel {
     contentHeight: root.fittedContentHeight(column.implicitHeight, Style.space(720))
 
     function outsideAction(args: list<string>): void {
+        if (outsideActionPending || recordingShortcut || menuModel.busy) return;
+        outsideActionPending = true;
+        outsideActionStarted = false;
         deferredArguments = args;
         close();
         outsideDelay.restart();
     }
 
+    function showActionError(): void {
+        if (owner && "open" in owner) owner.open();
+        else open = true;
+    }
+
     onOpenChanged: {
         if (!open) microphone.close();
+    }
+
+    property Connections lifecycleConnection: Connections {
+        target: root.menuModel
+        function onQuitFinished(): void { root.close(); }
+        function onActionFinished(ok): void {
+            if (!root.outsideActionPending || !root.outsideActionStarted) return;
+            root.outsideActionPending = false;
+            if (!ok) root.showActionError();
+        }
     }
 
     property Timer outsideDelayTimer: Timer {
@@ -37,7 +57,18 @@ Ui.KeyboardPanel {
         // KeyboardPanel releases focus immediately and fades for 140 ms.
         // Let it unmap before the CLI captures the paste target.
         interval: 180
-        onTriggered: root.menuModel.run(root.deferredArguments, "")
+        onTriggered: {
+            if (root.menuModel.busy || root.open) {
+                if (root.open) root.close();
+                outsideDelay.restart();
+                return;
+            }
+            root.outsideActionStarted = true;
+            if (!root.menuModel.run(root.deferredArguments, "")) {
+                root.outsideActionPending = false;
+                root.showActionError();
+            }
+        }
     }
 
     Item {
@@ -107,6 +138,17 @@ Ui.KeyboardPanel {
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
                     color: root.menuModel.error ? "#e7ae83" : Color.popups.text
+                }
+
+                Text {
+                    visible: root.feed.phase === "error" && root.feed.message !== ""
+                    width: parent.width
+                    text: root.feed.message
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    color: "#e7ae83"
                 }
 
                 Column {
@@ -400,11 +442,11 @@ Ui.KeyboardPanel {
                     }
                     Ui.Button {
                         id: quitButton
-                        text: "Quit"
-                        enabled: !root.recordingShortcut && !root.menuModel.busy && !root.menuModel.recording && !root.updateModel.installing && root.feed.phase !== "disconnected"
+                        text: root.menuModel.busy && root.menuModel.actionName === "quit" ? "Quitting…" : "Quit"
+                        enabled: !root.recordingShortcut && root.menuModel.canQuit && !root.updateModel.installing
                         opacity: enabled ? 1 : 0.4
                         focusable: true
-                        onClicked: { root.menuModel.run(["quit"], "JustSpeak stopped"); root.close(); }
+                        onClicked: root.menuModel.run(["quit"], "JustSpeak stopped")
                     }
                 }
             }

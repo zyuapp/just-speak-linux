@@ -35,8 +35,10 @@ pub enum Phase {
     Idle,
     Recording,
     Transcribing,
+    Canceling,
     Error,
     Updating,
+    Stopping,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,8 +120,14 @@ pub fn connect(path: &Path, request: Request) -> Result<UnixStream> {
 }
 
 pub fn call(path: &Path, request: Request) -> Result<Response> {
+    // Quit replies only after microphone/download/model cleanup has completed.
+    let timeout = if matches!(request, Request::Quit {}) {
+        30
+    } else {
+        16
+    };
     let stream = connect(path, request)?;
-    stream.set_read_timeout(Some(Duration::from_secs(16)))?;
+    stream.set_read_timeout(Some(Duration::from_secs(timeout)))?;
     let mut line = String::new();
     BufReader::new(stream.take(1024 * 1024)).read_line(&mut line)?;
     ensure_response_complete(&line)?;

@@ -14,6 +14,7 @@ use fs2::FileExt;
 use std::{
     fs::{self, File, OpenOptions},
     io::ErrorKind,
+    net::Shutdown,
     os::unix::{
         fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
         net::{UnixListener, UnixStream},
@@ -87,7 +88,9 @@ struct Service {
     feedback: Option<Feedback>,
     stop_pending: bool,
     shutdown: Arc<AtomicBool>,
+    shutdown_reply: Option<Sender<Response>>,
     delivered_text: Option<String>,
+    cleanup_error: Option<String>,
 }
 
 impl Service {
@@ -114,6 +117,7 @@ impl Service {
         self.status.can_cancel = false;
         self.started = None;
         self.delivered_text = None;
+        self.cleanup_error = None;
         self.target = None;
         self.generation.cancel();
         self.current_generation.store(0, Ordering::Release);
@@ -224,6 +228,44 @@ impl Service {
                 }
             }));
         }
+        // Preparation/finalization workers own the microphone and feedback
+        // until they return it. Do not advertise a usable idle state early.
+        if self.feedback.is_none() {
+            self.status.phase = Phase::Canceling;
+            self.status.message = Some("Stopping microphone".into());
+        }
+    }
+
+    fn feedback_ready(&mut self, feedback: Feedback) {
+        self.feedback = Some(feedback);
+        if self.status.phase == Phase::Canceling {
+            if let Some(error) = self.cleanup_error.take() {
+                self.fail(error);
+            } else {
+                self.idle(Some("Canceled".into()));
+            }
+            self.broadcast();
+        }
+    }
+
+    fn fail_after_cleanup(&mut self, error: String) {
+        if self.feedback.is_some() {
+            self.fail(error);
+        } else {
+            self.idle(Some(error.clone()));
+            self.status.phase = Phase::Canceling;
+            self.cleanup_error = Some(error);
+        }
+    }
+
+    fn check_recorder(&mut self) {
+        if let Some(recorder) = self.recorder.as_mut()
+            && let Err(error) = recorder.check_running()
+        {
+            self.cancel();
+            self.fail_after_cleanup(format!("{error:#}"));
+            self.broadcast();
+        }
     }
 
     fn require_idle(&self) -> Result<()> {
@@ -245,8 +287,7 @@ impl Service {
                 if let Err(error) = self.start() {
                     // A busy/not-ready response must preserve the running operation.
                     if self.status.model_ready
-                        && !self.status.can_cancel
-                        && self.status.phase != Phase::Updating
+                        && matches!(self.status.phase, Phase::Idle | Phase::Error)
                     {
                         self.fail(format!("{error:#}"));
                     }
@@ -321,7 +362,15 @@ impl Service {
                 self.deliver(id, text);
             }
             Request::Quit {} => {
-                self.require_idle()?;
+                ensure!(
+                    self.status.phase != Phase::Updating,
+                    "Wait for the current update or shortcut save before quitting"
+                );
+                self.cancel();
+                self.status.phase = Phase::Stopping;
+                self.status.message = Some("Stopping JustSpeak".into());
+                self.status.model_ready = false;
+                self.status.model_setup = None;
                 self.shutdown.store(true, Ordering::Relaxed);
             }
             Request::BeginUpdate {} => {
@@ -420,7 +469,14 @@ impl Service {
                     return;
                 }
                 let quiet = matches!(&request, Request::Status {});
+                let quitting = matches!(&request, Request::Quit {});
                 let result = self.command(request);
+                if quitting && result.is_ok() {
+                    // A successful Quit means shutdown finished, not just queued.
+                    self.shutdown_reply = Some(reply);
+                    self.broadcast();
+                    return;
+                }
                 let _ = reply.send(Response {
                     ok: result.is_ok(),
                     error: result.err().map(|error| format!("{error:#}")),
@@ -486,7 +542,7 @@ impl Service {
                 self.broadcast();
             }
             Event::FeedbackReady(feedback) => {
-                self.feedback = Some(feedback);
+                self.feedback_ready(feedback);
             }
             Event::Prepared(id, result, mut feedback) => {
                 if !self.generation.accepts(id) || result.is_err() {
@@ -498,7 +554,10 @@ impl Service {
                         let _ = events.send(Event::FeedbackReady(feedback));
                     }));
                     if self.generation.accepts(id) {
-                        self.fail(format!("Cannot start recording: {:#}", error.unwrap()));
+                        self.fail_after_cleanup(format!(
+                            "Cannot start recording: {}",
+                            error.unwrap()
+                        ));
                         self.broadcast();
                     }
                     return;
@@ -513,7 +572,7 @@ impl Service {
                 self.broadcast();
             }
             Event::Recorded(id, result, feedback) => {
-                self.feedback = Some(feedback);
+                self.feedback_ready(feedback);
                 if !self.generation.accepts(id) {
                     return;
                 }
@@ -626,10 +685,15 @@ fn listen(path: &Path) -> Result<(UnixListener, SocketGuard)> {
     ))
 }
 
-fn serve_client(mut stream: UnixStream, events: Sender<Event>) -> Result<()> {
+fn serve_client(
+    mut stream: UnixStream,
+    events: Sender<Event>,
+    quitting: Arc<AtomicBool>,
+) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(3)))?;
     stream.set_write_timeout(Some(Duration::from_secs(3)))?;
     let request: Request = serde_json::from_str(&protocol::read_line(&stream)?)?;
+    quitting.store(matches!(request, Request::Quit {}), Ordering::Release);
     if matches!(request, Request::Watch {}) {
         let (sender, receiver) = mpsc::sync_channel(8);
         events
@@ -639,25 +703,54 @@ fn serve_client(mut stream: UnixStream, events: Sender<Event>) -> Result<()> {
             protocol::write_json(&mut stream, &status)?;
         }
     } else {
+        let timeout = if matches!(request, Request::Quit {}) {
+            30
+        } else {
+            15
+        };
         let (sender, receiver) = mpsc::channel();
         events
             .send(Event::Request(request, sender))
             .map_err(|_| anyhow::anyhow!("service stopped"))?;
         protocol::write_json(
             &mut stream,
-            &receiver.recv_timeout(Duration::from_secs(15))?,
+            &receiver.recv_timeout(Duration::from_secs(timeout))?,
         )?;
     }
     Ok(())
 }
 
-fn accept_clients(listener: UnixListener, events: Sender<Event>, shutdown: Arc<AtomicBool>) {
+struct Client {
+    thread: thread::JoinHandle<()>,
+    stream: UnixStream,
+    quitting: Arc<AtomicBool>,
+}
+
+fn accept_clients(
+    listener: UnixListener,
+    events: Sender<Event>,
+    shutdown: Arc<AtomicBool>,
+) -> Vec<Client> {
+    let mut clients = Vec::new();
     while !shutdown.load(Ordering::Relaxed) {
         match listener.accept() {
             Ok((stream, _)) => {
                 let events = events.clone();
-                thread::spawn(move || {
-                    let _ = serve_client(stream, events);
+                let read_guard = match stream.try_clone() {
+                    Ok(guard) => guard,
+                    Err(error) => {
+                        eprintln!("JustSpeak socket: {error}");
+                        continue;
+                    }
+                };
+                let quitting = Arc::new(AtomicBool::new(false));
+                let client_quitting = quitting.clone();
+                clients.push(Client {
+                    thread: thread::spawn(move || {
+                        let _ = serve_client(stream, events, client_quitting);
+                    }),
+                    stream: read_guard,
+                    quitting,
                 });
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
@@ -668,7 +761,9 @@ fn accept_clients(listener: UnixListener, events: Sender<Event>, shutdown: Arc<A
                 break;
             }
         }
+        clients.retain(|client| !client.thread.is_finished());
     }
+    clients
 }
 
 fn inference_worker(
@@ -735,7 +830,7 @@ fn inference_worker(
 }
 
 pub fn run(config: Config) -> Result<()> {
-    let (listener, _guard) = listen(&socket_path()?)?;
+    let (listener, guard) = listen(&socket_path()?)?;
     let shutdown = Arc::new(AtomicBool::new(false));
     let signal = shutdown.clone();
     ctrlc::set_handler(move || signal.store(true, Ordering::Relaxed))?;
@@ -766,7 +861,9 @@ pub fn run(config: Config) -> Result<()> {
         feedback: Some(feedback),
         stop_pending: false,
         shutdown: shutdown.clone(),
+        shutdown_reply: None,
         delivered_text: None,
+        cleanup_error: None,
         config,
         status: Status::default(),
         generation: Generation::default(),
@@ -786,6 +883,9 @@ pub fn run(config: Config) -> Result<()> {
         }
         service.helpers.retain(|helper| !helper.is_finished());
         if service.status.phase == Phase::Recording {
+            service.check_recorder();
+        }
+        if service.status.phase == Phase::Recording {
             if service.started.is_some_and(|start| {
                 start.elapsed().as_secs() >= service.config.max_recording_seconds
             }) {
@@ -802,8 +902,8 @@ pub fn run(config: Config) -> Result<()> {
     drop(service.recorder.take());
     service.current_generation.store(0, Ordering::Release);
     let _ = service.worker.send(Work::Shutdown);
-    let _ = server.join();
-    for helper in service.helpers {
+    let clients = server.join().unwrap_or_default();
+    for helper in service.helpers.drain(..) {
         let _ = helper.join();
     }
     // Startup events may own capture/feedback guards. Release them before a
@@ -811,16 +911,151 @@ pub fn run(config: Config) -> Result<()> {
     while let Ok(event) = receiver.try_recv() {
         drop(event);
     }
-    match inference.join() {
-        Ok(result) => result?,
-        Err(_) => bail!("inference worker panicked"),
+    let result = match inference.join() {
+        Ok(result) => result,
+        Err(_) => Err(anyhow::anyhow!("inference worker panicked")),
+    };
+    drop(service.feedback.take());
+    service.watchers.clear();
+    // Release queued request/watch senders before waiting for socket writers.
+    drop(receiver);
+    let mut quit_clients = Vec::new();
+    for client in clients {
+        // An incomplete request must not hold shutdown open until its timeout.
+        let _ = client.stream.shutdown(Shutdown::Read);
+        if client.quitting.load(Ordering::Acquire) {
+            quit_clients.push(client);
+        } else {
+            let _ = client.thread.join();
+        }
     }
-    Ok(())
+    drop(guard);
+    if let Some(reply) = service.shutdown_reply.take() {
+        let _ = reply.send(Response {
+            ok: result.is_ok(),
+            error: result.as_ref().err().map(|error| format!("{error:#}")),
+            status: service.snapshot(),
+            data: None,
+        });
+    }
+    for client in quit_clients {
+        let _ = client.thread.join();
+    }
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn service_fixture(root: &Path) -> (Service, Receiver<Event>) {
+        let (events, receiver) = mpsc::channel();
+        let (worker, _) = mpsc::channel();
+        let mut generation = Generation::default();
+        let id = generation.begin();
+        (
+            Service {
+                config: Config::default(),
+                status: Status {
+                    phase: Phase::Recording,
+                    model_ready: true,
+                    can_cancel: true,
+                    ..Status::default()
+                },
+                generation,
+                current_generation: Arc::new(AtomicU64::new(id)),
+                recorder: None,
+                started: Some(Instant::now()),
+                target: None,
+                events,
+                worker,
+                watchers: Vec::new(),
+                helpers: Vec::new(),
+                history: History::load_from(&root.join("history/history.json")).unwrap(),
+                feedback: Some(Feedback::new_at(root.join("feedback")).unwrap()),
+                stop_pending: false,
+                shutdown: Arc::new(AtomicBool::new(false)),
+                shutdown_reply: None,
+                delivered_text: None,
+                cleanup_error: None,
+            },
+            receiver,
+        )
+    }
+
+    #[test]
+    fn cancel_waits_for_startup_and_finalization_cleanup_before_advertising_idle() {
+        for preparing in [true, false] {
+            let root = tempfile::tempdir().unwrap();
+            let (mut service, events) = service_fixture(root.path());
+            let feedback = service.feedback.take().unwrap();
+            let id = service.generation.active.unwrap();
+            if !preparing {
+                service.status.phase = Phase::Transcribing;
+            }
+            service.command(Request::Cancel {}).unwrap();
+            assert_eq!(service.snapshot().phase, Phase::Canceling);
+            assert!(!service.snapshot().can_cancel);
+            assert!(!service.generation.accepts(id));
+            assert!(service.command(Request::Start {}).is_err());
+            assert_eq!(service.snapshot().phase, Phase::Canceling);
+            assert!(service.command(Request::BeginUpdate {}).is_err());
+            let (watcher, updates) = mpsc::sync_channel(8);
+            service.watchers.push(watcher);
+            if preparing {
+                service.handle(Event::Prepared(
+                    id,
+                    Err(anyhow::anyhow!("canceled")),
+                    feedback,
+                ));
+                service.handle(events.recv_timeout(Duration::from_secs(2)).unwrap());
+            } else {
+                service.handle(Event::Recorded(
+                    id,
+                    Err(anyhow::anyhow!("canceled")),
+                    feedback,
+                ));
+            }
+            assert_eq!(
+                updates.recv_timeout(Duration::from_secs(1)).unwrap().phase,
+                Phase::Idle
+            );
+            assert!(service.require_idle().is_ok());
+            assert_eq!(service.snapshot().message.as_deref(), Some("Canceled"));
+            for helper in service.helpers {
+                helper.join().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn failed_start_becomes_retryable_only_after_cleanup_and_keeps_its_error() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut service, events) = service_fixture(root.path());
+        let feedback = service.feedback.take().unwrap();
+        let id = service.generation.active.unwrap();
+        service.handle(Event::Prepared(
+            id,
+            Err(anyhow::anyhow!("device disconnected")),
+            feedback,
+        ));
+        assert_eq!(service.snapshot().phase, Phase::Canceling);
+        assert!(service.command(Request::Start {}).is_err());
+        assert_eq!(service.snapshot().phase, Phase::Canceling);
+        service.handle(events.recv_timeout(Duration::from_secs(2)).unwrap());
+        assert_eq!(service.snapshot().phase, Phase::Error);
+        assert!(
+            service
+                .snapshot()
+                .message
+                .unwrap()
+                .contains("device disconnected")
+        );
+        assert!(service.require_idle().is_ok());
+        for helper in service.helpers {
+            helper.join().unwrap();
+        }
+    }
 
     #[test]
     fn cancel_then_restart_never_accepts_the_previous_transcript() {

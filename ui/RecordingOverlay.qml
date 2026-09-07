@@ -14,6 +14,12 @@ Scope {
             root.errorVisible = root.feed.phase === "error";
             if (root.errorVisible) errorTimeout.restart();
         }
+        function onMessageChanged(): void {
+            if (root.feed.phase === "error") {
+                root.errorVisible = true;
+                errorTimeout.restart();
+            }
+        }
     }
 
     Timer {
@@ -25,7 +31,7 @@ Scope {
     PanelWindow {
         screen: root.targetScreen
         visible: root.feed.phase === "recording" || root.feed.phase === "transcribing"
-                 || root.feed.phase === "loading" || root.errorVisible
+                 || root.feed.phase === "canceling" || root.feed.phase === "loading" || root.errorVisible
         anchors { bottom: true }
         margins { bottom: 70 }
         implicitWidth: 360
@@ -80,7 +86,8 @@ Scope {
                         width: parent.width
                         text: root.feed.phase === "error" ? root.feed.message
                               : root.feed.phase === "recording" ? "Release " + root.feed.shortcut + " to finish · Esc to cancel"
-                              : root.feed.phase === "transcribing" ? "Esc to cancel" : "Preparing local dictation"
+                              : root.feed.phase === "transcribing" ? "Esc to cancel"
+                              : root.feed.phase === "canceling" ? "Releasing the microphone and restoring audio" : "Preparing local dictation"
                         textFormat: Text.PlainText
                         wrapMode: Text.Wrap
                         maximumLineCount: root.feed.phase === "error" ? 3 : 1

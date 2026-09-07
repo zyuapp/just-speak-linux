@@ -51,10 +51,11 @@ impl Feedback {
             .map(PathBuf::from)
             .filter(|path| path.is_absolute())
             .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::geteuid() })));
-        Self::load_at(
-            runtime.join("just-speak/feedback"),
-            Box::<SystemBackend>::default(),
-        )
+        Self::new_at(runtime.join("just-speak/feedback"))
+    }
+
+    pub(crate) fn new_at(directory: PathBuf) -> Result<Self> {
+        Self::load_at(directory, Box::<SystemBackend>::default())
     }
 
     fn load_at(directory: PathBuf, backend: Box<dyn Backend>) -> Result<Self> {

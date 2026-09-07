@@ -15,8 +15,14 @@ Scope {
     property string actionErrors: ""
     property string readErrors: ""
     property string successMessage: ""
-    readonly property bool recording: ["recording", "transcribing", "updating", "loading"].includes(feed.phase)
-    readonly property bool canEdit: ready && !busy && !recording && feed.phase !== "disconnected"
+    property string actionName: ""
+    property bool actionTimedOut: false
+    property bool readTimedOut: false
+    property int revision: 0
+    property int readRevision: 0
+    readonly property bool recording: ["recording", "transcribing", "canceling", "updating", "loading", "stopping"].includes(feed.phase)
+    readonly property bool canQuit: !busy && !["updating", "stopping", "disconnected"].includes(feed.phase)
+    readonly property bool canEdit: ready && !loading && !busy && !recording && feed.phase !== "disconnected"
     readonly property var inputs: {
         let options = [{ value: "default", label: "System default microphone" }];
         for (const input of data.inputs || []) {
@@ -29,37 +35,48 @@ Scope {
     }
     signal refreshed()
     signal actionFinished(bool ok)
+    signal quitFinished()
 
     function refresh(): void {
-        if (!feed.executableReady || loading) {
+        if (feed.phase === "disconnected" || feed.phase === "stopping") {
+            refreshPending = false;
+            ready = false;
+            return;
+        }
+        if (!feed.executableReady || loading || busy) {
             refreshPending = true;
             return;
         }
         refreshPending = false;
         loading = true;
+        readTimedOut = false;
+        readRevision = revision;
         readErrors = "";
-        reader.command = [feed.executable, "menu", "--json"];
-        reader.running = true;
+        reader.startCommand([feed.executable, "menu", "--json"]);
         readTimeout.restart();
     }
 
-    function run(args: list<string>, success: string): void {
-        if (busy || !feed.executableReady) return;
+    function run(args: list<string>, success: string): bool {
+        if (busy || !feed.executableReady) return false;
         if (recording && !["cancel", "quit", "stop"].includes(args[0])) {
             error = "Finish or cancel dictation before changing settings.";
-            return;
+            return false;
         }
         busy = true;
+        revision++;
         error = "";
         notice = "";
         actionErrors = "";
+        actionName = args[0];
+        actionTimedOut = false;
+        if (actionName === "quit") notice = "Stopping JustSpeak…";
         successMessage = success;
         let command = [feed.executable];
         for (const arg of args) command.push(arg);
-        action.command = command;
-        action.running = true;
-        actionTimeout.interval = args[0] === "shortcut" ? 25000 : 10000;
+        action.startCommand(command);
+        actionTimeout.interval = args[0] === "quit" ? 35000 : args[0] === "shortcut" ? 25000 : 10000;
         actionTimeout.restart();
+        return true;
     }
 
     function toggle(key: string): void {
@@ -71,21 +88,39 @@ Scope {
         function onExecutableReadyChanged(): void {
             if (root.feed.executableReady && root.refreshPending) root.refresh();
         }
+        function onPhaseChanged(): void {
+            if (["disconnected", "stopping"].includes(root.feed.phase)) {
+                root.ready = false;
+                root.revision++;
+            }
+            else if (!root.busy && ["loading", "idle", "error"].includes(root.feed.phase)) root.refresh();
+        }
     }
 
-    Process {
+    CommandProcess {
         id: reader
+        onFailedToStart: root.readErrors = "Could not start JustSpeak. Reopen the app and try again."
         stdout: StdioCollector { id: menuOutput }
         stderr: SplitParser {
             onRead: line => root.readErrors = (root.readErrors + line + "\n").slice(0, 1200)
         }
-        onExited: exitCode => {
+        onFinished: exitCode => {
             readTimeout.stop();
             root.loading = false;
-            if (exitCode === 0) {
+            if (["disconnected", "stopping"].includes(root.feed.phase)) return;
+            if (root.busy || root.readRevision !== root.revision) {
+                root.ready = false;
+                root.refreshPending = true;
+                if (!root.busy) Qt.callLater(root.refresh);
+                return;
+            }
+            if (root.readTimedOut) {
+                root.ready = false;
+            } else if (exitCode === 0) {
                 try {
                     const result = JSON.parse(menuOutput.text);
-                    if (!result.settings || !Array.isArray(result.inputs) || !Array.isArray(result.history))
+                    if (!result.settings || typeof result.settings !== "object" || Array.isArray(result.settings)
+                        || !Array.isArray(result.inputs) || !Array.isArray(result.history))
                         throw new Error("Invalid menu response");
                     result.history = result.history.slice(0, 10);
                     root.data = result;
@@ -93,32 +128,42 @@ Scope {
                     if (typeof result.settings.shortcut === "string") root.feed.shortcut = result.settings.shortcut;
                     root.refreshed();
                 } catch (failure) {
-                    root.error = "Could not read JustSpeak settings. Restart JustSpeak and try again.";
+                    root.ready = false;
+                    root.error = root.error || "Could not read JustSpeak settings. Restart JustSpeak and try again.";
                 }
             } else {
-                root.error = root.readErrors.trim() || "Could not load JustSpeak settings.";
+                root.ready = false;
+                root.error = root.error || root.readErrors.trim() || "Could not load JustSpeak settings.";
             }
             if (root.refreshPending) Qt.callLater(root.refresh);
         }
     }
 
-    Process {
+    CommandProcess {
         id: action
+        onFailedToStart: root.actionErrors = "Could not start JustSpeak. Reopen the app and try again."
         stdout: SplitParser { onRead: line => {} }
         stderr: SplitParser {
             onRead: line => root.actionErrors = (root.actionErrors + line + "\n").slice(0, 1200)
         }
-        onExited: exitCode => {
+        onFinished: exitCode => {
             actionTimeout.stop();
             root.busy = false;
-            if (exitCode === 0) {
+            const ok = exitCode === 0 && !root.actionTimedOut;
+            if (ok) {
                 root.notice = root.successMessage;
                 noticeTimeout.restart();
-                root.refresh();
+                if (root.actionName === "quit") {
+                    root.feed.disconnected();
+                    root.quitFinished();
+                } else root.refresh();
             } else {
-                root.error = root.actionErrors.trim() || "JustSpeak could not complete that action.";
+                root.notice = "";
+                if (!root.actionTimedOut)
+                    root.error = root.actionErrors.trim() || "JustSpeak could not complete that action.";
+                if (root.refreshPending) root.refresh();
             }
-            root.actionFinished(exitCode === 0);
+            root.actionFinished(ok);
         }
     }
 
@@ -126,17 +171,18 @@ Scope {
         id: readTimeout
         interval: 8000
         onTriggered: {
+            root.readTimedOut = true;
             reader.running = false;
-            root.loading = false;
-            root.error = "Loading settings timed out. Try Refresh.";
+            if (!root.busy && root.readRevision === root.revision)
+                root.error = root.error || "Loading settings timed out. Try Refresh.";
         }
     }
     Timer {
         id: actionTimeout
         interval: 10000
         onTriggered: {
+            root.actionTimedOut = true;
             action.running = false;
-            root.busy = false;
             root.error = "The action timed out. Refresh to check its result.";
         }
     }

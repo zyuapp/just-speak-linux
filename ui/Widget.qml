@@ -7,13 +7,13 @@ Ui.BarWidget {
     moduleName: "local.just-speak"
     property bool opened: false
     property bool popoutSwitchClosing: false
-    implicitWidth: button.implicitWidth
-    implicitHeight: button.implicitHeight
+    visible: statusFeed.phase !== "disconnected"
+    implicitWidth: visible ? button.implicitWidth : 0
+    implicitHeight: visible ? button.implicitHeight : 0
 
     function open(): void {
         popoutSwitchClosing = false;
         opened = true;
-        menuState.error = "";
         menuState.refresh();
     }
     function close(): void { if (dictationMenu.requestClose()) opened = false; }
@@ -33,7 +33,7 @@ Ui.BarWidget {
     Connections {
         target: statusFeed
         function onPhaseChanged(): void {
-            if (root.opened && ["idle", "error", "disconnected"].includes(statusFeed.phase)) menuState.refresh();
+            if (statusFeed.phase === "disconnected" && !menuState.busy) root.close();
         }
     }
 

@@ -40,7 +40,7 @@ impl History {
         Self::load_from(&state.join("just-speak/history.json"))
     }
 
-    fn load_from(path: &Path) -> Result<Self> {
+    pub(crate) fn load_from(path: &Path) -> Result<Self> {
         let directory = path.parent().context("history path has no parent")?;
         fs::create_dir_all(directory).context("create private transcript history directory")?;
         let metadata = fs::symlink_metadata(directory)?;
