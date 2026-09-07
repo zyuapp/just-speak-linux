@@ -28,6 +28,24 @@ dialog. Ubuntu's GTK 4.6 also required explicitly clearing the transient parent
 before destroying the dialog; a debugger trace confirmed the stale-parent
 cleanup path during GJS shutdown.
 
+The final [portable release build](https://github.com/zyuapp/just-speak-linux/actions/runs/34149081570)
+and [Ubuntu 22.04 GTK check](https://github.com/zyuapp/just-speak-linux/actions/runs/34149083560)
+passed for `6856248b91aca11efddcff80720d316680e8f1b5`. All asset checksums,
+the complete payload manifest, and all 76 source archive files matched the
+audited commit. The downloaded portable binary also recognized the official
+speech fixture on Omarchy. Cold and existing-window recorder requests both
+returned promptly and kept the same GTK process in isolated live checks.
+
+[Version 0.2.1](https://github.com/zyuapp/just-speak-linux/releases/tag/v0.2.1)
+was published and installed through the existing 0.2.0 application's OTA path.
+The update detected the newer release, completed successfully, restarted the
+resident service with its model ready, and then reported 0.2.1 as up to date.
+The user's existing `SUPER + F10` binding and separate F9 Voxtype bindings were
+preserved, with no Hyprland configuration errors. The installed GTK window
+opened with an empty error log and the recorder module present. Isolated
+accessibility service tests temporarily disrupted the shared accessibility
+socket; restarting that service restored it before the final window check.
+
 Verification is performed with isolated fixtures wherever recording, clipboard,
 or desktop mutations would otherwise affect the user's session. GNOME/Ubuntu
 interactive desktop behavior is not included in the Omarchy verification scope.
