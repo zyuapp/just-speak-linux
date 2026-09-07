@@ -1,7 +1,7 @@
 # Local source snapshot recipe; this package is not published in the AUR.
 # See packaging/README.md for the matching git archive command.
 pkgname=just-speak-linux
-pkgver=0.2.4
+pkgver=0.2.5
 pkgrel=1
 pkgdesc='Offline voice dictation with GTK4 settings and optional Omarchy integration'
 arch=('x86_64')
@@ -54,11 +54,12 @@ package() {
     install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
     install -m644 docs/desktop-support.md docs/updates.md "$pkgdir/usr/share/doc/$pkgname/"
     install -d "$pkgdir/usr/share/just-speak/"{ui,gtk,packaging}
-    install -m644 ui/*.qml ui/manifest.json "$pkgdir/usr/share/just-speak/ui/"
+    install -m644 ui/*.qml ui/*.svg ui/manifest.json "$pkgdir/usr/share/just-speak/ui/"
     install -m644 gtk/*.js "$pkgdir/usr/share/just-speak/gtk/"
     install -m644 packaging/README.md packaging/hyprland.lua "$pkgdir/usr/share/just-speak/packaging/"
     install -Dm755 scripts/download-model.sh "$pkgdir/usr/share/just-speak/scripts/download-model.sh"
     install -Dm644 packaging/just-speak.desktop "$pkgdir/usr/share/applications/just-speak.desktop"
+    install -Dm644 ui/just-speak.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/just-speak.svg"
     install -Dm644 packaging/just-speak.service "$pkgdir/usr/lib/systemd/user/just-speak.service"
     install -Dm644 packaging/just-speak-overlay.service "$pkgdir/usr/lib/systemd/user/just-speak-overlay.service"
 }

@@ -41,13 +41,19 @@ Ui.BarWidget {
         id: button
         anchors.fill: parent
         bar: root.bar
-        text: statusFeed.phase === "recording" ? "●" : statusFeed.phase === "transcribing" ? "◌" : "󰍬"
+        text: statusFeed.phase === "recording" ? "●" : statusFeed.phase === "transcribing" ? "◌" : ""
+        iconComponent: ["recording", "transcribing"].includes(statusFeed.phase) ? null : speakIcon
         active: statusFeed.phase === "recording"
         tooltipText: root.opened ? "" : "JustSpeak · " + statusFeed.label
         onPressed: mouseButton => {
             if (mouseButton === Qt.RightButton && statusFeed.canCancel) menuState.run(["cancel"], "Canceled");
             else root.toggle();
         }
+    }
+
+    Component {
+        id: speakIcon
+        JustSpeakIcon { color: button.foreground }
     }
 
     DictationMenu {

@@ -246,6 +246,15 @@ def desktop_quote(text):
     return '"' + str(text).replace('\\', '\\\\\\\\').replace('"', '\\\\"').replace('`', '\\\\`').replace('$', '\\\\$').replace('%', '%%') + '"'
 desktop = '\n'.join('Exec=' + desktop_quote(prefix / 'bin/just-speak') + ' window' if line.startswith('Exec=') else line for line in desktop.splitlines()) + '\n'
 write(data / 'applications/just-speak.desktop', desktop)
+# Keep the icon pointed at the active release, including after later app updates.
+icon_source = prefix / 'share/just-speak/ui/just-speak.svg'
+if icon_source.is_file():
+    icon = data / 'icons/hicolor/scalable/apps/just-speak.svg'
+    icon.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=icon.parent) as temporary:
+        link = pathlib.Path(temporary) / 'icon'
+        link.symlink_to(icon_source)
+        os.replace(link, icon)
 PY
 if (( download_model )); then
     "$prefix/bin/just-speak" model download

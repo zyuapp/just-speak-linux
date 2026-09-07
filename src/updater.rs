@@ -388,7 +388,8 @@ fn allowed_file(path: &str) -> bool {
         return true;
     }
     if let Some(name) = path.strip_prefix("share/just-speak/ui/") {
-        return !name.contains('/') && (name.ends_with(".qml") || name == "manifest.json");
+        return !name.contains('/')
+            && (name.ends_with(".qml") || matches!(name, "manifest.json" | "just-speak.svg"));
     }
     if let Some(name) = path.strip_prefix("share/just-speak/gtk/") {
         return !name.contains('/')
@@ -806,6 +807,10 @@ mod tests {
                 )
             })
             .collect();
+        files.push((
+            "share/just-speak/ui/just-speak.svg".into(),
+            include_bytes!("../ui/just-speak.svg").to_vec(),
+        ));
         let manifest = Manifest {
             format: 1,
             version: "0.3.0".into(),
@@ -882,6 +887,10 @@ mod tests {
         let destination = directory.path().join("payload");
         fs::create_dir(&destination).unwrap();
         extract_payload(&file, &destination, &Version::parse("0.3.0").unwrap()).unwrap();
+        assert_eq!(
+            fs::read(destination.join("share/just-speak/ui/just-speak.svg")).unwrap(),
+            include_bytes!("../ui/just-speak.svg")
+        );
         assert_eq!(
             fs::metadata(destination.join("bin/just-speak"))
                 .unwrap()

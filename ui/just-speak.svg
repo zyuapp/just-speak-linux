@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>JustSpeak</title>
+  <!-- Original JustSpeak artwork. Copyright 2026 JustSpeak contributors. MIT. -->
+  <defs>
+    <linearGradient id="warm" x1="32" y1="16" x2="224" y2="240" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff985f"/>
+      <stop offset="1" stop-color="#df4d32"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="60" fill="url(#warm)"/>
+  <path d="M76 54h104a30 30 0 0 1 30 30v68a30 30 0 0 1-30 30h-61l-40 29v-29h-3a30 30 0 0 1-30-30V84a30 30 0 0 1 30-30Z" fill="#fff7ed"/>
+  <g fill="none" stroke="#a83224" stroke-width="13" stroke-linecap="round">
+    <path d="M94 108v20"/>
+    <path d="M128 88v60"/>
+    <path d="M162 100v36"/>
+  </g>
+</svg>

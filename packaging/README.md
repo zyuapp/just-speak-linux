@@ -99,7 +99,7 @@ This PKGBUILD builds a committed local snapshot; it is not an AUR submission.
 From the repository root:
 
 ```sh
-git archive --format=tar.gz --prefix=just-speak-linux-0.2.4/ --output=packaging/just-speak-linux-0.2.4.tar.gz HEAD
+git archive --format=tar.gz --prefix=just-speak-linux-0.2.5/ --output=packaging/just-speak-linux-0.2.5.tar.gz HEAD
 cd packaging
 makepkg -si
 ```

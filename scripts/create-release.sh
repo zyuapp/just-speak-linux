@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='just-speak-release-') as temporary:
         shutil.copyfile(source, destination)
     copy(binary, 'bin/just-speak')
     for source in sorted((project / 'ui').iterdir()):
-        if source.is_file() and (source.suffix == '.qml' or source.name == 'manifest.json'):
+        if source.is_file() and (source.suffix == '.qml' or source.name in ('manifest.json', 'just-speak.svg')):
             copy(source, 'share/just-speak/ui/' + source.name)
     for source in sorted((project / 'gtk').iterdir()):
         if source.is_file() and source.suffix in ('.js', '.css', '.json'):

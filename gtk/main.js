@@ -271,7 +271,7 @@ async function installUpdate() {
 }
 
 function buildWindow(application) {
-    window = new Gtk.ApplicationWindow({application, title: 'JustSpeak', default_width: 520, default_height: 760});
+    window = new Gtk.ApplicationWindow({application, title: 'JustSpeak', icon_name: 'just-speak', default_width: 520, default_height: 760});
     window.connect('notify::is-active', () => {
         if (window.is_active && pendingRecorder && !polling) { pendingRecorder = false; openShortcutRecorder(); }
     });

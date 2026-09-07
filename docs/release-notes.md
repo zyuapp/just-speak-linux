@@ -1,3 +1,7 @@
-Standalone modifier shortcuts such as Right Alt are now rejected in the shortcut recorder and CLI because releasing them may fail to stop recording. Use F10 or a combination such as Super + F10 instead.
+JustSpeak now has its own speech-bubble and sound-bar icon: warm orange in the application launcher and a theme-colored version in the Omarchy bar. Recording and transcription keep their existing status indicators. The artwork is original and covered by the project’s MIT license.
 
-Older saved shortcuts remain loadable so users can open settings and replace them; existing bindings are not automatically changed. The recorder explains unsupported selections and keeps Save disabled until a valid shortcut is captured and released.
+Upgrading from v0.2.4 or earlier requires the release installer because those versions’ in-app updater rejects SVG assets. Run the installer below as your desktop user; it also registers the new launcher icon.
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/zyuapp/just-speak-linux/main/scripts/install-release.sh | bash -s -- --version 0.2.5
+```
