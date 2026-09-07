@@ -59,8 +59,10 @@ window closes.
 - Check for and install application updates; restart or quit the service.
 
 The recording indicator shows listening, transcription, cancellation and errors.
-Optional sounds bracket capture. Output muting restores the original sink when
-recording ends; recovery also checks for an interrupted previous service. User
+Capture starts before the optional start sound so delayed playback cannot cut
+off early speech. Output muting follows the sound attempt, even if it fails,
+and restores the original sink when recording ends; recovery also checks for
+an interrupted previous service. User
 volume/mute changes and replaced audio devices are not blindly overwritten.
 
 ```sh

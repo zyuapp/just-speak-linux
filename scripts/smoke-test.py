@@ -48,6 +48,27 @@ elif name == "wl-copy":
         time.sleep(0.01)
     (root / "clipboard.txt").write_text(text)
     event("copy_finished")
+elif name == "pw-play":
+    event("cue_started")
+    # Reproduce a device that takes longer than the cue deadline to start.
+    time.sleep(60)
+elif name == "pw-dump":
+    print(json.dumps([
+        {"type": "PipeWire:Interface:Core", "info": {"cookie": 123}},
+        {"id": 42, "type": "PipeWire:Interface:Node", "info": {
+            "props": {"node.name": "speakers", "object.serial": 77, "media.class": "Audio/Sink"},
+            "params": {"Props": [{"mute": (root / "muted").exists(), "volume": 1.0}]}}},
+        {"type": "PipeWire:Interface:Metadata", "props": {"metadata.name": "default"},
+         "metadata": [{"subject": 0, "key": "default.audio.sink", "value": {"name": "speakers"}}]}
+    ]))
+elif name == "wpctl":
+    assert sys.argv[1:3] == ["set-mute", "42"]
+    if sys.argv[3] == "1":
+        (root / "muted").touch()
+        event("muted")
+    else:
+        (root / "muted").unlink(missing_ok=True)
+        event("unmuted")
 elif name == "hyprctl":
     if sys.argv[1:] == ["-j", "activewindow"]:
         print(json.dumps({"address": "0x1234", "class": "firefox", "initialClass": "firefox", "pid": 42, "tags": []}))
@@ -96,7 +117,7 @@ def smoke(binary, model, root):
     assert fixture.is_file(), f"missing speech fixture: {fixture}"
     for directory in ["bin", "config/just-speak", "runtime", "data", "cache", "tmp", "state"]:
         (root / directory).mkdir(parents=True, mode=0o700)
-    for program in ["pw-record", "wl-copy", "hyprctl"]:
+    for program in ["pw-record", "pw-play", "pw-dump", "wpctl", "wl-copy", "hyprctl"]:
         helper = root / "bin" / program
         helper.write_text(f"#!{sys.executable}\n" + HELPER)
         helper.chmod(0o700)
@@ -227,6 +248,31 @@ def smoke(binary, model, root):
             time.sleep(0.15)
             assert count("dispatch") == 1 and idle()
             print("PASS cancellation stays responsive during clipboard handshake and suppresses paste", flush=True)
+
+            cli("settings", "set", "sound_feedback", "true")
+            cli("settings", "set", "mute_while_recording", "true")
+            cli("settings", "set", "paste", "false")
+            for action in ["stop", "cancel"]:
+                previous_events = len(read_jsonl(root / "events.jsonl"))
+                previous_cues = count("cue_started")
+                cli("start")
+                wait_for(lambda: count("cue_started") > previous_cues, "stalled start sound")
+                events = [entry["event"] for entry in read_jsonl(root / "events.jsonl")[previous_events:]]
+                assert events.index("recording_started") < events.index("cue_started"), events
+                # Release/cancel during feedback startup must still clean up the
+                # recorder, recover speaker mute, and suppress unwanted delivery.
+                cli(action)
+                wait_for(idle, f"{action} during stalled start sound")
+                wait_for(clean_recordings, "stalled-feedback recording cleanup")
+                wait_for(lambda: not (root / "runtime/just-speak/feedback/mute.json").exists(),
+                         "stalled-feedback mute restoration")
+                events = [entry["event"] for entry in read_jsonl(root / "events.jsonl")[previous_events:]]
+                assert "muted" in events and "unmuted" in events, events
+                assert not (root / "muted").exists()
+                assert count("dispatch") == 1 and count("copy_started") == 3
+            cli("settings", "set", "sound_feedback", "false")
+            cli("settings", "set", "mute_while_recording", "false")
+            print("PASS capture precedes stalled sound; mute, stop, cancellation, and cleanup survive timeout", flush=True)
 
             cli("start")
             assert status()["phase"] == "recording"

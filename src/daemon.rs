@@ -154,6 +154,10 @@ impl Service {
                 if let Some(input) = &config.input {
                     inputs::validate_selected(input)?;
                 }
+                ensure!(current.load(Ordering::Acquire) == id, "recording canceled");
+                // Capture speech immediately, including while optional sound playback
+                // or output muting is starting. A slow cue must not lose first words.
+                let recorder = Recorder::start(config.input.as_deref())?;
                 if let Err(error) =
                     feedback.begin(config.sound_feedback, config.mute_while_recording)
                 {
@@ -161,7 +165,7 @@ impl Service {
                     let _ = feedback.end(false);
                 }
                 ensure!(current.load(Ordering::Acquire) == id, "recording canceled");
-                Ok((Recorder::start(config.input.as_deref())?, target))
+                Ok((recorder, target))
             })();
             let _ = events.send(Event::Prepared(id, result, feedback));
         }));

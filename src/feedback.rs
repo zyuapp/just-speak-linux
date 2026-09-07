@@ -80,14 +80,13 @@ impl Feedback {
         Ok(feedback)
     }
 
-    /// Call before Recorder::start, on the start worker. The 60 ms start cue is
-    /// allowed to finish (250 ms deadline) before capture begins, avoiding cue
-    /// leakage into transcription. Output muting follows the cue.
+    /// Call after Recorder::start, on the start worker, so sound playback cannot
+    /// cut off speech. Output muting follows the bounded cue attempt, even when
+    /// playback fails. Capture includes this interval; never trim early speech.
     pub fn begin(&mut self, sound: bool, mute: bool) -> Result<()> {
         self.restore()?;
-        if sound {
-            self.backend
-                .cue(&self.directory.join("start-v1.wav"), true)?;
+        if sound && let Err(error) = self.backend.cue(&self.directory.join("start-v1.wav"), true) {
+            eprintln!("JustSpeak: optional start sound unavailable: {error:#}");
         }
         if !mute {
             return Ok(());
@@ -383,6 +382,7 @@ mod tests {
         objects: Vec<Value>,
         changes: Vec<(u32, bool)>,
         cues: Vec<bool>,
+        cue_fails: bool,
     }
     struct Fake(Arc<Mutex<State>>);
     impl Backend for Fake {
@@ -396,7 +396,9 @@ mod tests {
             Ok(())
         }
         fn cue(&mut self, _: &Path, wait: bool) -> Result<()> {
-            self.0.lock().unwrap().cues.push(wait);
+            let mut state = self.0.lock().unwrap();
+            state.cues.push(wait);
+            ensure!(!state.cue_fails, "sound cue playback timed out");
             Ok(())
         }
     }
@@ -405,6 +407,7 @@ mod tests {
         Arc::new(Mutex::new(State {
             changes: vec![],
             cues: vec![],
+            cue_fails: false,
             objects: vec![
                 json!({"type":"PipeWire:Interface:Core","info":{"cookie":123}}),
                 json!({"id":42,"type":"PipeWire:Interface:Node","info":{
@@ -429,6 +432,21 @@ mod tests {
         feedback.end(true).unwrap();
         assert_eq!(state.lock().unwrap().changes, vec![(42, true), (42, false)]);
         assert_eq!(state.lock().unwrap().cues, vec![true, false]);
+        assert!(!root.path().join("mute.json").exists());
+    }
+
+    #[test]
+    fn failed_start_sound_does_not_skip_mute_or_restoration() {
+        let root = tempfile::tempdir().unwrap();
+        let state = state();
+        state.lock().unwrap().cue_fails = true;
+        let mut feedback =
+            Feedback::load_at(root.path().to_owned(), Box::new(Fake(state.clone()))).unwrap();
+        feedback.begin(true, true).unwrap();
+        assert!(root.path().join("mute.json").exists());
+        assert_eq!(state.lock().unwrap().changes, vec![(42, true)]);
+        feedback.end(false).unwrap();
+        assert_eq!(state.lock().unwrap().changes, vec![(42, true), (42, false)]);
         assert!(!root.path().join("mute.json").exists());
     }
 
