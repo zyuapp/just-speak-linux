@@ -35,3 +35,19 @@ Release artifacts share the same Linux x86_64 payload. Distribution installers
 supply appropriate dependencies; the user installer only activates Omarchy
 integration when that desktop is present. A Debian package and GNOME-specific
 adapter can be added without forking the speech engine or release repository.
+
+## GNOME adapter investigation
+
+The [GlobalShortcuts portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html)
+provides session-bound shortcuts with Activated and Deactivated signals, making
+it a candidate for mapping press/release to the existing Start/Stop API. Binding
+normally presents the desktop's shortcut configuration dialog. Implementation
+must probe the running portal rather than assume support from a distro name.
+
+The [RemoteDesktop portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html)
+provides keyboard input methods within an explicitly authorized session. It is
+an option to investigate for paste, not an implemented or permission-free
+replacement for the current Hyprland adapter. Clipboard-only delivery remains
+the intended fallback. Validate both paths on an actual GNOME/Wayland session,
+including release events, canceled permission prompts, session loss and focus
+changes, before claiming native GNOME support.

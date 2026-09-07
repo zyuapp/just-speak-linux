@@ -8,6 +8,11 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/zyuapp/j
 
 Run this as your desktop user. The default installation prefix is `~/.local`; set `JUST_SPEAK_PREFIX` or pass `--prefix` for another user-owned prefix. The installer downloads the configured speech model, writes and enables the user service, and installs the GTK launcher. It enables the bar plugin only when Omarchy is present. It leaves existing shortcuts alone. On supported Omarchy, explicitly pass `--bind-f10` to configure F10 through JustSpeak's conflict checks and validated binding editor.
 
+For a nondefault install prefix, use `--no-bar` unless the Omarchy shell has
+`JUST_SPEAK_BIN` set to that prefix's stable `bin/just-speak` path. The GTK
+launcher uses the installed absolute path; the optional bar otherwise prefers
+`~/.local/bin/just-speak`.
+
 Dependencies are not installed automatically. On Ubuntu 22.04+, the corresponding package command is:
 
 ```sh

@@ -60,3 +60,27 @@ Public portable artifacts therefore use the Ubuntu release workflow baseline;
 the locally built artifact is not evidence of compatibility with older Ubuntu.
 A shared binary and GTK interface do not establish tested GNOME global shortcuts
 or automatic paste. See [desktop support](desktop-support.md).
+
+## Published artifact acceptance
+
+The [Ubuntu baseline release build](https://github.com/zyuapp/just-speak-linux/actions/runs/34096127723)
+passed for commit `a5c6e71f3728e79e64bf3a0d14b60c9a5a6dca17`.
+Its dynamic ABI maxima are GLIBC 2.34 and GLIBCXX 3.4.30. The separate
+[Ubuntu 22.04 GTK compatibility run](https://github.com/zyuapp/just-speak-linux/actions/runs/34096273522)
+also passed with synthetic controls under Xvfb; this does not constitute a
+GNOME/Wayland shortcut, microphone-permission or paste test.
+
+The exact downloaded binary passed all seven real-model daemon smoke groups
+again on the Omarchy development machine. Its source archive matched all 73
+files of the audited commit, and every release asset matched SHA256SUMS.
+[Version 0.2.0](https://github.com/zyuapp/just-speak-linux/releases/tag/v0.2.0)
+was then published and installed through its public release installer.
+
+Live acceptance confirmed the enabled, active user service with its model ready,
+reuse of the existing model, available microphone enumeration, the persistent
+bar plugin, and a mapped GTK window. The new shortcut editor successfully saved
+F10 with no Hyprland configuration errors; the original F9 Voxtype press/release
+bindings remained present. The duplicate standalone overlay service was disabled.
+The installed update check correctly reported current/latest 0.2.0 with no newer
+release available. These checks did not record a physical conversation or paste
+text into the user's applications.
