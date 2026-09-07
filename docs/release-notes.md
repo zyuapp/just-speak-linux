@@ -1,13 +1,13 @@
-Version 0.2.6 restores OTA upgrades from v0.2.3 and earlier supported updaters.
-If “Install update” failed with “unexpected or duplicate release file:
-share/just-speak/ui/just-speak.svg”, check for updates again and install v0.2.6.
-No manual installer or intermediate upgrade is needed.
+Version 0.2.7 fixes the shortcut recorder disappearing when mouse movement
+changes window focus. The dialog now pauses capture and keeps completed
+shortcuts visible until you return and choose Save or Cancel. Completed previews
+also remain open without the recording timeout.
 
-The JustSpeak icon is preserved. Its launcher artwork is now embedded in the
-executable so older archive validators accept the release. The installed app
-registers the launcher icon on daemon startup or window launch, preserving the
-existing launch command. Models, settings, history and shortcuts are retained.
+Capture resumes only after the desktop grants keyboard shortcut protection and
+the dialog has focus again. If focus changes while keys are still held, record
+the chord again so missed key releases cannot enable an unsafe save.
 
-Publication requires the actual published v0.2.3 updater to install the exact
-new archive successfully in an isolated installation, alongside the existing
-Rust, GTK, ABI and real-model checks.
+This release retains OTA compatibility with v0.2.3 and the embedded JustSpeak
+icon introduced in v0.2.6. Existing models, history, settings and shortcuts are
+preserved. Reopen an already-running settings window after updating so it loads
+the corrected recorder.

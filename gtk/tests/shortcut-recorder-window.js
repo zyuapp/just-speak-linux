@@ -25,6 +25,7 @@ function make(options = {}) {
     return liveRecorder;
 }
 function preview(recorder) {
+    if (!recorder.surface?.shortcuts_inhibited) protectedFixture(recorder);
     recorder.capture.arm();
     recorder.capture.press('F12', 96, 0);
     recorder.capture.release('F12', 96);
@@ -32,12 +33,14 @@ function preview(recorder) {
 }
 function protectedFixture(recorder) {
     const realWindow = recorder.window;
-    const fixture = {restored: 0, navigation: []};
+    const fixture = {restored: 0, navigation: [], modifiers: 0};
     recorder.window = {is_active: true, destroy: () => realWindow.destroy(),
         set_transient_for: value => realWindow.set_transient_for(value),
-        child_focus: direction => { fixture.navigation.push(direction); return true; }, get_focus: () => null};
+        child_focus: direction => { fixture.navigation.push(direction); return true; }, get_focus: () => null,
+        get_display: () => ({get_default_seat: () => ({get_keyboard: () => ({get_modifier_state: () => fixture.modifiers})})})};
     recorder.surface = {shortcuts_inhibited: true, restore_system_shortcuts() { fixture.restored++; }};
     recorder.inhibitRequested = true;
+    recorder.focusChanged(true);
     return fixture;
 }
 async function run() {
@@ -50,17 +53,54 @@ async function run() {
     assert(recorder.capture.candidate === '', 'Waiting dialog accepted a shortcut before inhibition');
     recorder.capture.arm();
     recorder.keyPressed(Gdk.KEY_F10, 76, 0);
-    assert(recorder.closed && restored === 1, 'Revoked inhibition did not abort and restore');
+    assert(!recorder.closed && recorder.paused && !recorder.capture.candidate, 'Unprotected key input was accepted or dismissed the dialog');
     recorder.close();
     assert(closed === 1 && restored === 1, 'Cleanup was not idempotent');
 
-    recorder = make();
-    recorder.surface = {restore_system_shortcuts() { restored++; }};
-    recorder.inhibitRequested = true;
-    recorder.hadFocus = true;
+    let saves = 0;
+    recorder = make({save: async () => { saves++; }, timeout: 20});
+    protectedFixture(recorder);
     preview(recorder);
+    recorder.window.is_active = false;
     recorder.focusChanged(false);
-    assert(recorder.closed && recorder.capture.held.size === 0 && restored === 2, 'Focus loss did not discard preview and restore');
+    assert(!recorder.closed && recorder.paused && recorder.capture.candidate === 'F12'
+        && !recorder.saveButton.sensitive && recorder.timer === 0, 'Focus loss discarded the completed preview');
+    await sleep(40);
+    assert(!recorder.closed, 'Preview timed out during mouse navigation');
+    await recorder.commit();
+    assert(saves === 0, 'Unfocused preview allowed a save');
+    recorder.surface.shortcuts_inhibited = false;
+    recorder.inhibitionChanged();
+    recorder.window.is_active = true;
+    recorder.focusChanged(true);
+    assert(recorder.paused && !recorder.saveButton.sensitive, 'Focus alone resumed capture before protection');
+    recorder.surface.shortcuts_inhibited = true;
+    recorder.inhibitionChanged();
+    assert(!recorder.paused && recorder.saveButton.sensitive && recorder.capture.candidate === 'F12', 'Protected refocus lost the preview');
+    await recorder.commit();
+    assert(saves === 1 && recorder.closed, 'Preserved preview could not be saved');
+
+    // Protection can change before the focus notification. A held chord and
+    // queued Enter action must not become a save after releases are missed.
+    recorder = make({save: async () => { saves++; }});
+    const resumed = protectedFixture(recorder);
+    preview(recorder);
+    recorder.keyPressed(Gdk.KEY_Return, 36, 0);
+    recorder.surface.shortcuts_inhibited = false;
+    recorder.inhibitionChanged();
+    assert(!recorder.closed && recorder.paused && recorder.capture.candidate === ''
+        && recorder.keyboardAction === null, 'Interrupted held chord or Enter survived protection loss');
+    recorder.window.is_active = false;
+    recorder.focusChanged(false);
+    recorder.keyReleased(Gdk.KEY_Return, 36, 0);
+    recorder.window.is_active = true;
+    resumed.modifiers = Gdk.ModifierType.SUPER_MASK;
+    recorder.surface.shortcuts_inhibited = true;
+    recorder.focusChanged(true);
+    assert(!recorder.paused && recorder.capture.keysDown && !recorder.saveButton.sensitive, 'Refocus ignored a pre-held modifier');
+    recorder.keyReleased(Gdk.KEY_Super_L, 133, Gdk.ModifierType.SUPER_MASK);
+    assert(saves === 1 && !recorder.capture.canSave, 'Refocus executed a stale keyboard save');
+    recorder.close();
 
     let stored = 'SUPER + F10';
     recorder = make({save: async () => { throw new Error('F12 is already assigned to another application'); }});
@@ -78,6 +118,7 @@ async function run() {
     recorder.keyPressed(Gdk.KEY_Escape, 9, 0);
     recorder.cancelButton.emit('clicked');
     assert(recorder.saving && !recorder.closed && !recorder.cancelButton.sensitive, 'Escape/Cancel pretended to abort a committed save');
+    recorder.keyReleased(Gdk.KEY_Escape, 9, 0);
     finishSave();
     await pendingSave;
     assert(recorder.closed && stored === 'F12', 'Explicit save did not finish');
@@ -124,7 +165,7 @@ async function run() {
     recorder.startTimeout();
     await until(() => recorder.closed, 'Recorder timeout did not close');
     assert(notice.includes('timed out') && recorder.timer === 0, 'Timeout did not clean up and explain cancellation');
-    print('SHORTCUT_WINDOW_TESTS_COMPLETE: GTK constructor, protection, focus loss, conflict, deferred cancel/save, pre-held modifiers, navigation, timeout');
+    print('SHORTCUT_WINDOW_TESTS_COMPLETE: GTK constructor, protection, focus pause/resume, preserved preview, missed releases, conflict, deferred cancel/save, pre-held modifiers, navigation, timeout');
 
     if (ARGV.includes('--compositor')) {
         // Run explicitly on a compositor advertising keyboard-shortcuts-inhibit.

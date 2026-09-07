@@ -32,8 +32,12 @@ service's conflict checks. A conflict leaves the previous shortcut in place.
 The dialog keeps desktop shortcuts suspended until all observed keys and held
 modifiers are released, including keys pressed during the preview or save.
 Cancel or a completed save waits for those releases while the dialog retains
-focus. Losing focus, closing the parent, or losing compositor protection cleans
-up immediately. An idle recorder times out after 30 seconds; a pending close
+focus. Losing focus or compositor protection pauses capture and preserves a
+completed preview. Capture resumes only once both focus and protection return.
+If keys were still held at interruption, the chord must be recorded again
+because release events may have gone to another window. Closing the parent
+still cleans up immediately. Active recording times out after 30 seconds;
+paused recording and completed previews wait for the user. A pending close
 with held keys asks you to release them or switch to another window. Saving is
 an explicit commit: Cancel is disabled while the service finishes the request.
 

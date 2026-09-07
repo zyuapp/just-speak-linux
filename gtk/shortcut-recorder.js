@@ -91,6 +91,7 @@ export class ShortcutRecorder {
         this.inhibitSignal = 0;
         this.inhibitRequested = false;
         this.hadFocus = false;
+        this.paused = true;
         this.closed = false;
         this.saving = false;
         this.timer = 0;
@@ -134,7 +135,7 @@ export class ShortcutRecorder {
         this.controller.connect('key-pressed', (_controller, keyval, keycode, state) => this.keyPressed(keyval, keycode, state));
         this.controller.connect('key-released', (_controller, keyval, keycode, state) => this.keyReleased(keyval, keycode, state));
         this.controller.connect('modifiers', (_controller, state) => {
-            if (this.closed) return false;
+            if (this.closed || this.paused) return false;
             this.capture.observeModifiers(state);
             this.afterRelease();
             return false;
@@ -172,22 +173,39 @@ export class ShortcutRecorder {
         if (this.closed) return;
         if (this.surface?.shortcuts_inhibited === true && this.window.is_active) {
             this.clearTimer('grantTimer');
+            const resuming = this.paused;
+            this.paused = false;
+            if (resuming) this.capture.observeModifiers(this.window.get_display().get_default_seat()?.get_keyboard()?.get_modifier_state() || 0);
             if (this.capture.phase === 'waiting') {
                 this.capture.arm();
-                this.capture.observeModifiers(this.window.get_display().get_default_seat()?.get_keyboard()?.get_modifier_state() || 0);
-                this.startTimeout();
-                this.render();
             }
-        } else if (this.capture.phase !== 'waiting') {
-            this.close(this.saving ? 'The shortcut save is still finishing.'
-                : 'Shortcut recording canceled because the desktop restored its shortcuts.', true);
+            if (this.capture.phase === 'recording' && !this.timer && !this.saving) this.startTimeout();
+            this.render();
+        } else {
+            this.pauseCapture();
         }
+    }
+    pauseCapture() {
+        if (this.closed) return;
+        // An explicit Cancel still completes if focus leaves before key-up.
+        if (this.pendingClose) { this.close(this.pendingClose.message, true); return; }
+        this.paused = true;
+        this.keyboardAction = null;
+        this.clearTimer('timer');
+        if (!this.window.is_active) this.clearTimer('grantTimer');
+        // Key releases can go to another window. Keep only a completed chord;
+        // a partially held chord must be recorded again, never saved as released.
+        if (this.capture.keysDown || !['preview', 'waiting'].includes(this.capture.phase)) {
+            const interrupted = this.capture.keysDown;
+            this.capture.reset();
+            if (interrupted) this.capture.error = 'Focus changed while keys were held. Release them, then record your shortcut again.';
+        }
+        this.render();
     }
     focusChanged(active) {
         if (this.closed) return;
         if (active) { this.hadFocus = true; this.inhibitionChanged(); }
-        else if (this.hadFocus) this.close(this.saving ? 'The shortcut save is still finishing.'
-            : 'Shortcut recording canceled when the window lost focus.', true);
+        else if (this.hadFocus) this.pauseCapture();
     }
     startTimeout() {
         this.clearTimer('timer');
@@ -200,6 +218,11 @@ export class ShortcutRecorder {
     keyPressed(keyval, keycode, state) {
         const name = Gdk.keyval_name(keyval);
         if (this.closed) return true;
+        if (this.paused || this.surface?.shortcuts_inhibited !== true || !this.window.is_active) {
+            this.pauseCapture();
+            if (name === 'Escape' && !this.saving) this.close();
+            return true;
+        }
         if (this.saving || this.pendingClose) {
             this.capture.hold(name, keycode, state);
             this.render();
@@ -230,10 +253,6 @@ export class ShortcutRecorder {
             this.render();
             return true;
         }
-        if (this.surface?.shortcuts_inhibited !== true || !this.window.is_active) {
-            this.close('Shortcut recording lost keyboard protection. Try again.', true);
-            return true;
-        }
         try {
             const base = modifiers.has(name) ? name : baseKeyName(this.window.get_display(), keyval, keycode, this.controller.get_group());
             this.capture.press(name, keycode, state, base);
@@ -245,7 +264,7 @@ export class ShortcutRecorder {
         return true;
     }
     keyReleased(keyval, keycode, state) {
-        if (this.closed) return;
+        if (this.closed || this.paused) return;
         this.capture.release(Gdk.keyval_name(keyval), keycode, state);
         if (this.keyboardAction?.code === keycode) this.keyboardAction.released = true;
         this.afterRelease();
@@ -266,26 +285,32 @@ export class ShortcutRecorder {
     render() {
         if (this.closed) return;
         const preview = this.capture.phase === 'preview';
+        // A completed preview waits for an explicit decision, including while
+        // the pointer crosses other windows on focus-follows-mouse desktops.
+        if (preview) this.clearTimer('timer');
         this.preview.label = preview ? this.capture.candidate : 'Press your shortcut';
         this.message.label = this.pendingClose ? 'Release all keys to close the recorder, or switch to another window to cancel. Desktop shortcuts remain suspended while you release the keys here.'
             : this.saving ? 'Saving shortcut…'
+            : this.paused ? (preview ? 'Shortcut captured. Return to this window to save it.'
+                : 'Recording paused. Focus this window and wait for shortcut recording to resume.')
             : preview ? (this.capture.keysDown ? 'Release all keys to continue.' : 'Shortcut captured. Click Save or press Enter to use it, or record again.')
                 : 'Press a function key or a modifier with another key, such as Super + F10. Desktop shortcuts are suspended while this window stays focused.';
         this.error.label = this.capture.error;
         this.error.visible = Boolean(this.capture.error);
-        this.saveButton.sensitive = this.capture.canSave && !this.saving && !this.pendingClose;
+        this.saveButton.sensitive = this.capture.canSave && !this.paused && !this.saving && !this.pendingClose;
         this.cancelButton.sensitive = !this.saving && !this.pendingClose;
         this.again.visible = preview;
-        this.again.sensitive = !this.capture.keysDown && !this.saving && !this.pendingClose;
+        this.again.sensitive = !this.paused && !this.capture.keysDown && !this.saving && !this.pendingClose;
     }
     restart() {
-        if (this.closed || this.saving || this.pendingClose || this.capture.keysDown) return;
+        if (this.closed || this.paused || this.saving || this.pendingClose || this.capture.keysDown) return;
         this.capture.reset();
         this.keyboardAction = null;
         this.inhibitionChanged();
     }
     async commit() {
-        if (this.closed || this.saving || this.pendingClose || !this.capture.canSave) return;
+        if (this.closed || this.paused || this.surface?.shortcuts_inhibited !== true || !this.window.is_active
+            || this.saving || this.pendingClose || !this.capture.canSave) return;
         this.saving = true;
         this.window.deletable = false;
         this.clearTimer('timer');
@@ -296,7 +321,6 @@ export class ShortcutRecorder {
         } catch (error) {
             if (!this.closed) {
                 this.capture.error = String(error.message || error);
-                this.startTimeout();
             }
         } finally {
             this.saving = false;
