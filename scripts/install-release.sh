@@ -27,7 +27,7 @@ installs the bar plugin. Settings/history use the shared GTK interface.
   --help               Show this help
 
 Requires curl, Python 3, systemd user services, PipeWire's pw-record and wpctl,
-and wl-copy. The settings window additionally needs GJS and GTK 4. Ubuntu
+and wl-copy. The settings window and shortcut recorder additionally need GJS and GTK 4. Ubuntu
 GNOME hold-to-talk and automatic paste are experimental and unverified.
 No sudo, package installation, or keybinding changes occur by default.
 HELP
@@ -59,7 +59,7 @@ for program in curl python3 systemctl pw-record wpctl wl-copy; do
     fi
 done
 if ! command -v gjs >/dev/null; then
-    printf 'The settings window needs GJS and GTK 4 (Ubuntu: gjs gir1.2-gtk-4.0; Arch: gjs gtk4). The daemon can still run.\n' >&2
+    printf 'The settings window and shortcut recorder need GJS and GTK 4 (Ubuntu: gjs gir1.2-gtk-4.0; Arch: gjs gtk4). The daemon can still run.\n' >&2
 fi
 export JUST_SPEAK_PREFIX=$prefix
 config_dir=${XDG_CONFIG_HOME:-$HOME/.config}

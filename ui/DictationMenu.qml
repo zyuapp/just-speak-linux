@@ -21,8 +21,7 @@ Ui.KeyboardPanel {
     }
 
     onOpenChanged: {
-        if (open) shortcutField.text = menuModel.data.settings.shortcut || feed.shortcut;
-        else microphone.close();
+        if (!open) microphone.close();
     }
 
     property Timer outsideDelayTimer: Timer {
@@ -31,13 +30,6 @@ Ui.KeyboardPanel {
         // Let it unmap before the CLI captures the paste target.
         interval: 180
         onTriggered: root.menuModel.run(root.deferredArguments, "")
-    }
-
-    property Connections menuConnections: Connections {
-        target: root.menuModel
-        function onRefreshed(): void {
-            if (!shortcutField.activeFocus) shortcutField.text = root.menuModel.data.settings.shortcut || root.feed.shortcut;
-        }
     }
 
     Item {
@@ -281,22 +273,23 @@ Ui.KeyboardPanel {
                     Row {
                         width: parent.width
                         spacing: Style.space(6)
-                        Ui.TextField {
-                            id: shortcutField
-                            width: parent.width - applyShortcut.implicitWidth - parent.spacing
-                            enabled: root.editable
-                            placeholderText: "e.g. SUPER + F10"
-                            maximumLength: 96
-                            selectByMouse: true
-                            onAccepted: if (root.editable && text.trim()) root.menuModel.run(["shortcut", "set", text.trim()], "Shortcut updated")
+                        Text {
+                            width: parent.width - recordShortcut.implicitWidth - parent.spacing
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.menuModel.data.settings.shortcut || root.feed.shortcut
+                            textFormat: Text.PlainText
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.body
+                            color: Color.popups.text
+                            elide: Text.ElideRight
                         }
                         Ui.Button {
-                            id: applyShortcut
-                            text: "Apply"
+                            id: recordShortcut
+                            text: "Record shortcut…"
                             focusable: true
-                            enabled: root.editable && shortcutField.text.trim() !== "" && shortcutField.text.trim() !== root.feed.shortcut
+                            enabled: root.editable && root.menuModel.data.desktop?.shortcut_editing === true
                             opacity: enabled ? 1 : 0.45
-                            onClicked: root.menuModel.run(["shortcut", "set", shortcutField.text.trim()], "Shortcut updated")
+                            onClicked: root.outsideAction(["window", "--record-shortcut"])
                         }
                     }
                 }

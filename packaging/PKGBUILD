@@ -1,7 +1,7 @@
 # Local source snapshot recipe; this package is not published in the AUR.
 # See packaging/README.md for the matching git archive command.
 pkgname=just-speak-linux
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc='Offline voice dictation with GTK4 settings and optional Omarchy integration'
 arch=('x86_64')

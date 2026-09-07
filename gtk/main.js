@@ -4,14 +4,19 @@ import GLib from 'gi://GLib';
 import Pango from 'gi://Pango';
 import System from 'system';
 import {Backend, sampleMenu, delay} from './backend.js';
+import {ShortcutRecorder} from './shortcut-recorder.js';
 
 const visibleSmoke = ARGV.includes('--smoke-test-visible');
 const smoke = visibleSmoke || ARGV.includes('--smoke-test');
 const app = new Gtk.Application({application_id: smoke ? 'io.github.zyuapp.JustSpeak.Smoke' : 'io.github.zyuapp.JustSpeak',
-    // FLAGS_NONE works with Ubuntu 22.04's GLib 2.72; DEFAULT_FLAGS needs 2.74.
-    flags: smoke ? Gio.ApplicationFlags.NON_UNIQUE : Gio.ApplicationFlags.FLAGS_NONE});
+    // Command-line requests also reach an already-running window over D-Bus.
+    flags: smoke ? Gio.ApplicationFlags.NON_UNIQUE : Gio.ApplicationFlags.HANDLES_COMMAND_LINE});
+app.add_main_option('record-shortcut', 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
+    'Open the shortcut recorder', null);
 const backend = new Backend(smoke);
 let window;
+let recorder = null;
+let pendingRecorder = false;
 let smokeExit = 0;
 let interval = 0;
 let polling = false;
@@ -85,7 +90,9 @@ function renderStatus() {
     controls.cancel.sensitive = !busy;
     controls.input.sensitive = canEdit();
     controls.shortcut.sensitive = canEdit() && capabilities().shortcut_editing === true;
-    controls.apply.sensitive = controls.shortcut.sensitive;
+    controls.record.sensitive = controls.shortcut.sensitive;
+    if (recorder && !recorder.saving && (recording() || status.phase === 'disconnected'))
+        recorder.close('Shortcut recording canceled because JustSpeak is busy or stopped.');
     controls.clear.sensitive = canEdit() && metadata.history.length > 0;
     controls.history.sensitive = canEdit();
     controls.restart.sensitive = !busy && !installing && !recording();
@@ -98,13 +105,13 @@ function renderStatus() {
 function renderMenu() {
     rendering = true;
     try {
-        controls.version.label = `JustSpeak ${metadata.version || '0.2.0'}`;
+        controls.version.label = metadata.version ? `JustSpeak ${metadata.version}` : 'JustSpeak';
         const desktop = capabilities();
         controls.desktop.label = desktop.shortcut_editing
             ? `Hold ${metadata.settings.shortcut || status.shortcut} in any application to dictate.`
             : 'Use Start and Finish here, then paste from the clipboard. Global shortcuts and automatic paste are not available on this desktop yet.';
         controls.experimental.visible = desktop.experimental === true;
-        if (!controls.shortcut.has_focus) controls.shortcut.text = metadata.settings.shortcut || status.shortcut || 'F10';
+        controls.shortcut.label = metadata.settings.shortcut || status.shortcut || 'F10';
         for (const [key, control] of switches) control.active = metadata.settings[key] === true;
         const signature = JSON.stringify([metadata.inputs, metadata.settings.input]);
         if (signature !== inputSignature) {
@@ -173,7 +180,28 @@ async function poll() {
             && Date.now() - lastUpdate > 6 * 60 * 60 * 1000) void checkUpdates(false);
     } finally {
         polling = false;
+        if (pendingRecorder) { pendingRecorder = false; openShortcutRecorder(); }
     }
+}
+
+function openShortcutRecorder() {
+    if (recorder) { recorder.present(); return; }
+    if (!canEdit() || capabilities().shortcut_editing !== true) {
+        showNotice(capabilities().shortcut_editing === false
+            ? 'Shortcut recording is not available on this desktop yet.'
+            : 'Start JustSpeak and finish any dictation before changing the shortcut.');
+        return;
+    }
+    showNotice('');
+    recorder = new ShortcutRecorder({parent: window,
+        current: metadata.settings.shortcut || status.shortcut,
+        save: async shortcut => {
+            try { await mutate(['shortcut', 'set', shortcut], 'Shortcut updated'); }
+            catch (error) { showError(error); throw error; }
+        },
+        closed: message => { recorder = null; if (message) showNotice(message); },
+    });
+    recorder.present();
 }
 async function mutate(args, message = '') {
     if (busy || installing) return;
@@ -292,11 +320,10 @@ function buildWindow(application) {
     controls.inputError.add_css_class('error');
     content.append(controls.inputError);
     section('Hold-to-talk shortcut', content);
-    controls.shortcut = new Gtk.Entry({placeholder_text: 'e.g. SUPER + F10', hexpand: true, max_length: 96});
-    const saveShortcut = () => mutate(['shortcut', 'set', controls.shortcut.text.trim()], 'Shortcut updated');
-    controls.shortcut.connect('activate', () => { if (controls.apply.sensitive) void saveShortcut().catch(showError); });
-    controls.apply = button('Apply', saveShortcut);
-    content.append(row(controls.shortcut, controls.apply));
+    controls.shortcut = label('F10', {hexpand: true});
+    controls.shortcut.add_css_class('heading');
+    controls.record = button('Record shortcut…', openShortcutRecorder);
+    content.append(row(controls.shortcut, controls.record));
     section('Preferences', content);
     for (const [key, title] of [['sound_feedback', 'Recording sounds'], ['mute_while_recording', 'Mute other audio while recording'],
         ['paste', 'Paste automatically'], ['history_enabled', 'Save recent transcripts'], ['auto_check_updates', 'Check for updates automatically']]) {
@@ -314,7 +341,7 @@ function buildWindow(application) {
     controls.check = button('Check for updates', () => checkUpdates(true));
     controls.install = button('Install update', installUpdate, {visible: false});
     content.append(row(controls.check, controls.install));
-    controls.version = label('JustSpeak 0.2.0', {hexpand: true});
+    controls.version = label('JustSpeak', {hexpand: true});
     controls.version.add_css_class('dim-label');
     controls.restart = button('Restart', () => mutate(['restart'], 'Restarting JustSpeak'));
     controls.quit = button('Quit JustSpeak', () => mutate(['quit'], 'JustSpeak stopped'));
@@ -355,9 +382,15 @@ app.connect('activate', () => {
     void poll().catch(showError);
     interval = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => { void poll().catch(showError); return GLib.SOURCE_CONTINUE; });
 });
+app.connect('command-line', (_application, commandLine) => {
+    pendingRecorder = pendingRecorder || commandLine.get_options_dict().contains('record-shortcut');
+    app.activate();
+    return 0;
+});
 app.connect('shutdown', () => {
+    if (recorder) recorder.close('', true);
     if (interval) GLib.source_remove(interval);
     backend.close();
 });
-const exitCode = app.run([]);
+const exitCode = app.run(smoke ? [] : ['just-speak', ...ARGV]);
 System.exit(smoke ? smokeExit : exitCode);

@@ -80,7 +80,11 @@ enum Commands {
         command: HistoryCommand,
     },
     /// Open the shared GTK4 settings and history window.
-    Window,
+    Window {
+        /// Open the key-capture dialog instead of the settings page.
+        #[arg(long)]
+        record_shortcut: bool,
+    },
     Quit,
     Launch,
     Restart,
@@ -304,7 +308,7 @@ fn control_command(command: &Commands) -> Option<Result<()>> {
         Commands::Watch => watch(),
         Commands::Quit => control(Request::Quit {}),
         Commands::Launch => user_service("start"),
-        Commands::Window => open_window(),
+        Commands::Window { record_shortcut } => open_window(*record_shortcut),
         Commands::Restart => restart_service(),
         Commands::Menu { json: _ } => menu(),
         Commands::Input {
@@ -336,7 +340,7 @@ fn control_command(command: &Commands) -> Option<Result<()>> {
     })
 }
 
-fn open_window() -> Result<()> {
+fn open_window(record_shortcut: bool) -> Result<()> {
     use std::os::unix::process::CommandExt;
     let exe = env::current_exe()?;
     let prefix = env::var_os("JUST_SPEAK_PREFIX")
@@ -354,6 +358,12 @@ fn open_window() -> Result<()> {
         })
         .unwrap_or_else(|| exe.clone());
     let mut candidates = Vec::new();
+    // A checkout must use its matching frontend, not an older installed UI.
+    if let Some(root) = exe.parent().and_then(Path::parent).and_then(Path::parent)
+        && root.join("Cargo.toml").is_file()
+    {
+        candidates.push(root.join("gtk/main.js"));
+    }
     if let Some(prefix) = prefix {
         candidates.push(prefix.join("share/just-speak/gtk/main.js"));
     }
@@ -365,12 +375,23 @@ fn open_window() -> Result<()> {
         .into_iter()
         .find(|path| path.is_file())
         .context("GTK window not installed; reinstall JustSpeak")?;
-    Err(Command::new("gjs")
-        .arg("-m")
-        .arg(path)
-        .env("JUST_SPEAK_BIN", stable)
-        .exec())
-    .context("Open GTK4 window (requires gjs and GTK4)")
+    let mut command = Command::new("gjs");
+    command.arg("-m").arg(path).env("JUST_SPEAK_BIN", stable);
+    if record_shortcut {
+        // The Omarchy popup closes before launch. Its short-lived CLI child
+        // must not own the dialog or keep the popup's output collectors open.
+        command
+            .arg("--record-shortcut")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .context("Open shortcut recorder (requires GJS and GTK4)")?;
+        Ok(())
+    } else {
+        Err(command.exec()).context("Open GTK4 window (requires GJS and GTK4)")
+    }
 }
 
 fn menu() -> Result<()> {

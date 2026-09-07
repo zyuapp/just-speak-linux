@@ -30,7 +30,7 @@ const STABLE_PATHS: [&str; 4] = [
     "share/just-speak/gtk",
     "share/licenses/just-speak-linux",
 ];
-const REQUIRED_FILES: [&str; 13] = [
+const REQUIRED_FILES: [&str; 14] = [
     "bin/just-speak",
     "share/just-speak/ui/manifest.json",
     "share/just-speak/ui/Widget.qml",
@@ -42,6 +42,7 @@ const REQUIRED_FILES: [&str; 13] = [
     "share/just-speak/ui/shell.qml",
     "share/just-speak/gtk/main.js",
     "share/just-speak/gtk/backend.js",
+    "share/just-speak/gtk/shortcut-recorder.js",
     "share/licenses/just-speak-linux/LICENSE",
     "share/licenses/just-speak-linux/THIRD_PARTY_NOTICES.md",
 ];

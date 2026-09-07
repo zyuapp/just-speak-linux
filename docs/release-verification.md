@@ -1,5 +1,24 @@
 # Version 0.2 release verification
 
+## Shortcut recorder (0.2.1)
+
+The shortcut recorder replaces free-text editing in both interfaces. The GTK
+dialog waits for compositor shortcut inhibition before accepting a key, records
+physical key combinations, and requires an explicit Save. Existing backend
+conflict checks remain responsible for rejecting occupied shortcuts.
+
+Local checks passed for the 51 ordinary Rust tests, strict Clippy, formatting,
+shell syntax, and synthetic GTK key sequences. These tests cover modifiers,
+shifted punctuation, repeats, preview state, and key-release gating. The QML
+popup was checked with synthetic data and harmless helper programs: the button
+respects busy/desktop capability states and closes the popup before launching
+the shared recorder. Hidden GTK lifecycle tests cover denied protection, focus
+loss, conflicts, cancellation, keys held during saving, pre-held modifiers,
+keyboard navigation, and timeout cleanup. On live Hyprland, the compositor
+granted inhibition, unbound F35 was captured, holding unbound F34 disabled Save,
+and the final release and synthetic save restored inhibition. These checks do
+not record microphone input or alter the user's existing bindings.
+
 Verification is performed with isolated fixtures wherever recording, clipboard,
 or desktop mutations would otherwise affect the user's session. GNOME/Ubuntu
 interactive desktop behavior is not included in the Omarchy verification scope.

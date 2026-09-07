@@ -25,7 +25,9 @@ Omarchy. It does not install system dependencies or silently replace your shortc
 Review the [installer](scripts/install-release.sh) before running it if preferred.
 For supported options, download it and run `bash install-release.sh --help`.
 
-On Omarchy, choose **F10** in the app's shortcut editor, or run:
+On Omarchy, click **Record shortcut**, press **F10** (or your preferred
+combination), then click **Save**. There is no shortcut name to type. Advanced
+users can still configure it from the command line:
 
 ```sh
 ~/.local/bin/just-speak shortcut set F10
@@ -38,7 +40,7 @@ is being developed.
 
 Requirements: Linux x86_64, a user systemd session, PipeWire (`pw-record`,
 `pw-dump`, `pw-play`), WirePlumber (`wpctl`), `wl-clipboard`, Bash, curl, Python 3,
-coreutils and util-linux. The shared window needs **GJS and GTK4 introspection**.
+coreutils and util-linux. The shared window and shortcut recorder need **GJS and GTK4 introspection**.
 The Omarchy bar uses its installed Quickshell shell. The installer reports missing
 dependencies rather than invoking a package manager with elevated privileges.
 
@@ -50,7 +52,9 @@ window closes.
 
 - Choose a microphone by its stable PipeWire name, or follow the system default.
 - Review the last ten transcripts, copy or paste an entry, or clear history.
-- Edit the shortcut on supported Hyprland Lua desktops.
+- Record a shortcut by pressing its keys on supported Hyprland Lua desktops.
+  Review the captured combination before saving; Escape cancels and conflicts
+  leave the existing shortcut intact.
 - Toggle recording sounds, output muting, automatic paste, history, and update checks.
 - Check for and install application updates; restart or quit the service.
 

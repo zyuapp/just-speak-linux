@@ -22,6 +22,12 @@ jobs:
         env:
           G_DEBUG: fatal-criticals
         run: timeout 30s xvfb-run -a dbus-run-session -- gjs -m gtk/main.js --smoke-test
+      - name: Check shortcut capture key sequences
+        run: gjs -m gtk/tests/shortcut-recorder.js
+      - name: Check shortcut recorder lifecycle with synthetic input
+        env:
+          G_DEBUG: fatal-criticals
+        run: timeout 30s xvfb-run -a dbus-run-session -- gjs -m gtk/tests/shortcut-recorder-window.js
 
 # This checks GTK/GJS compatibility. It does not test GNOME shortcuts,
 # automatic paste, audio capture, or updates, and produces no release artifacts.
