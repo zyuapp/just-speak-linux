@@ -17,7 +17,7 @@ Scope {
     property string notice: ""
     property real lastCheck: 0
     readonly property string label: {
-        if (installing) return "Installing update… JustSpeak will restart when it is ready.";
+        if (installing) return "Installing update… JustSpeak and the Omarchy bar will reload.";
         if (checking) return "Checking for updates…";
         if (error) return error;
         if (notice) return notice;
@@ -88,7 +88,7 @@ Scope {
                 root.notice = "Update installed. JustSpeak is restarting.";
                 root.menuModel.refresh();
             } else {
-                root.error = root.diagnostics.trim() || "The update could not be installed. Your current version is still available.";
+                root.error = root.diagnostics.trim() || "The update needs attention. Check the installed version and update log.";
             }
         }
     }

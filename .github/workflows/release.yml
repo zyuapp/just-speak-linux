@@ -37,8 +37,7 @@ jobs:
         run: |
           cargo fmt --all --check
           for script in scripts/*.sh; do bash -n "$script"; done
-          python3 -m py_compile scripts/collect-licenses.py scripts/package_ui.py
-          python3 scripts/test-package-ui.py
+          python3 -m py_compile scripts/collect-licenses.py
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             python3 - <<'PY'
           import os, re

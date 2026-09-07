@@ -1,5 +1,20 @@
 # Version 0.2 release verification
 
+## Upgrade interface refresh (0.2.2)
+
+A live 0.2.1 popup remained stale after a successful OTA file switch and plugin
+rescan. Restarting the Omarchy shell loaded the correct Record shortcut button.
+A separate single-engine test also showed that release-specific QML filenames
+could fail against cached directory metadata after an atomic symlink switch.
+
+The final fix uses Omarchy's supported shell restart after installation when
+this installation's JustSpeak plugin is enabled, then checks shell readiness.
+The release installer calls the same helper. Tests cover enabled, absent, and
+disabled integrations; restart refusal; malformed registry output; and failed
+readiness. Update service output goes to the journal so closing the originating
+popup cannot break its output pipe. The refresh command can be retried without
+reinstalling if a locked session or another error prevents the shell restart.
+
 ## Shortcut recorder (0.2.1)
 
 The shortcut recorder replaces free-text editing in both interfaces. The GTK

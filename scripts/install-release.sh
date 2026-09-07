@@ -271,6 +271,9 @@ if (( install_bar )) && command -v omarchy >/dev/null && command -v omarchy-shel
     if (( start_service )); then
         omarchy-shell shell rescanPlugins
         omarchy plugin enable local.just-speak --section right
+        # A rescan can retain both compiled QML and directory metadata. Use the
+        # installed version's checked refresh after enabling the integration.
+        "$prefix/bin/just-speak" update refresh-ui
         # The bar plugin owns the recording overlay on current Omarchy.
         systemctl --user disable --now just-speak-overlay.service 2>/dev/null || true
     fi

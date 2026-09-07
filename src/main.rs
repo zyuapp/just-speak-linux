@@ -8,6 +8,7 @@ mod inference;
 mod inputs;
 mod protocol;
 mod shortcut;
+mod ui_refresh;
 mod updater;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -142,6 +143,8 @@ enum HistoryCommand {
 }
 #[derive(Subcommand)]
 enum UpdateCommand {
+    /// Reload the installed Omarchy interface after an upgrade.
+    RefreshUi,
     Check {
         #[arg(long)]
         json: bool,
@@ -211,6 +214,7 @@ fn run() -> Result<()> {
         Commands::Daemon => daemon::run(config),
         Commands::Doctor => doctor(&config),
         Commands::Update { command } => match command {
+            UpdateCommand::RefreshUi => ui_refresh::refresh().map(|_| ()),
             UpdateCommand::Check { json } => {
                 let info = updater::check(&config.updates_repo)?;
                 if json {
@@ -221,21 +225,20 @@ fn run() -> Result<()> {
                 Ok(())
             }
             UpdateCommand::Install { version } => {
-                // The service outlives the menu that triggered it when UI assets reload.
+                // The service outlives the menu that triggered it. Keep its output in
+                // the journal: restarting the shell closes the menu's pipe collectors.
                 let mut command = Command::new("systemd-run");
-                command.args([
-                    "--user",
-                    "--collect",
-                    "--wait",
-                    "--pipe",
-                    "--unit=just-speak-update",
-                ]);
+                command.args(["--user", "--collect", "--wait", "--unit=just-speak-update"]);
                 for name in [
                     "JUST_SPEAK_PREFIX",
                     "XDG_CONFIG_HOME",
                     "XDG_DATA_HOME",
                     "XDG_STATE_HOME",
                     "XDG_RUNTIME_DIR",
+                    "OMARCHY_PATH",
+                    "WAYLAND_DISPLAY",
+                    "HYPRLAND_INSTANCE_SIGNATURE",
+                    "PATH",
                 ] {
                     if let Some(value) = env::var_os(name) {
                         command
@@ -249,7 +252,7 @@ fn run() -> Result<()> {
                 }
                 ensure!(
                     command.status()?.success(),
-                    "Update failed; see `journalctl --user -u just-speak-update`"
+                    "Update needs attention; files may already be installed. See `journalctl --user -u just-speak-update`"
                 );
                 Ok(())
             }
@@ -458,11 +461,9 @@ fn apply_update(config: &Config, version: Option<&str>) -> Result<()> {
                     .args(["--user", "restart", "just-speak-overlay.service"])
                     .status();
             }
-            if executable_exists("omarchy-shell") {
-                let _ = Command::new("omarchy-shell")
-                    .args(["shell", "rescanPlugins"])
-                    .status();
-            }
+            ui_refresh::refresh().context(
+                "Update installed, but the Omarchy interface could not reload. Unlock the session if needed, then run `just-speak update refresh-ui`",
+            )?;
             protocol::write_json(&mut io::stdout().lock(), &result)
         }
         Err(error) => {

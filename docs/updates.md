@@ -109,16 +109,26 @@ A local build inherits its host's ABI requirements. For example, an Arch-built b
 
 The speech model is not bundled in the binary archive. Its explicit downloader verifies the pinned upstream archive separately and preserves its attribution information.
 
-## Omarchy popup refresh
 
-Starting with 0.2.2, release packages give every JustSpeak QML component a
-release-specific filename, including the popup's nested components. The plugin
-manifest points to the matching versioned widget. A plugin rescan therefore
-loads new component URLs instead of reusing code cached under stable filenames.
-This applies to both OTA updates and release-installer upgrades without
-restarting the whole Omarchy shell. Original flat files remain in the package
-so existing 0.2.0 and 0.2.1 updaters can install the fix directly.
+## Omarchy interface after upgrades
 
-The release workflow checks the packaged component graph for stale type names
-and preserves the paths expected by older updaters. Merely checking the service
-version or the files on disk does not verify a running popup's code.
+Starting with 0.2.2, a successful OTA upgrade restarts the Omarchy shell when
+JustSpeak's bar plugin is installed and enabled. This briefly reloads the bar
+and its popups so cached QML cannot survive the upgrade. The standalone GTK
+window still needs to be closed and reopened when its own code changes.
+The release installer uses the same refresh command after enabling the plugin.
+Other desktops and disabled JustSpeak bar integrations are skipped.
+
+The updater runs independently of the popup that launched it, so reloading the
+shell does not interrupt installation. Omarchy's supported restart command
+preserves its lock-screen safeguards. A refused or failed restart is reported
+as an installed update needing interface refresh; it is not silently ignored.
+After unlocking or resolving the error, retry without reinstalling:
+
+```sh
+just-speak update refresh-ui
+```
+
+The 0.2.1 updater itself predates this fix. Use the 0.2.2 release installer for
+that transition, or run the refresh command once after its OTA upgrade.
+Subsequent upgrades use the corrected automatic refresh path.

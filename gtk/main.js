@@ -262,7 +262,7 @@ async function installUpdate() {
         // refresh failure here must not turn a successful install into failure.
         lastMenu = 0;
     } catch (error) {
-        controls.update.label = `Update failed: ${error.message}`;
+        controls.update.label = `Update needs attention: ${error.message}`;
     } finally {
         installing = false;
         controls.check.sensitive = true;
