@@ -62,6 +62,7 @@ jobs:
           cargo test --locked
           cargo clippy --locked --all-targets -- -D warnings
           cargo build --release --locked
+          python3 scripts/test-shortcut-resolver.py --binary target/release/just-speak
       - name: Verify Ubuntu 22.04 ABI baseline
         run: |
           python3 - <<'PY'

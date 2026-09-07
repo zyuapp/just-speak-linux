@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "local.just-speak",
   "name": "JustSpeak",
-  "version": "0.2.7",
+  "version": "0.2.10",
   "author": "JustSpeak contributors",
   "description": "Local dictation, microphone settings, and recent transcripts",
   "kinds": ["bar-widget"],

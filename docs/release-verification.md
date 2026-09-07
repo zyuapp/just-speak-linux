@@ -1,5 +1,25 @@
 # Version 0.2 release verification
 
+## Installed shortcut lookup (0.2.10)
+
+The 0.2.8/0.2.9 popup could not locate its keymap helper after Omarchy loaded the
+plugin through symlinks and Quickshell virtual URLs. The original popup fixture
+used sibling UI/helper directories, so it missed this installation failure.
+Changing that fixture to load the UI via a symlink outside the payload reproduced
+the error before the fix.
+
+The popup now calls `shortcut resolve-key` on its existing executable. That
+command embeds the GJS script, runs before configuration/service access, and
+replaces its process with GJS so existing cancellation/deadline behavior holds.
+The fixture now verifies actual Super+F11 capture, release gating, the Save
+button, and the saved setting. A separate CLI regression copies the binary to
+an unrelated directory without frontend files and verifies embedded-script
+execution, invalid-settings independence, exit status and argument bounds.
+Local checks passed all 60 ordinary Rust tests, strict Clippy, formatting, the
+26 QtTest results, the keymap fixtures, and timeout/retry through the new CLI
+launcher. The final release binary passed the relocated executable check and
+real Super+F11 capture/Save in the symlinked popup fixture.
+
 ## First-run speech model setup (0.2.9)
 
 The shared GTK window offers an explicit model download, stage progress, and

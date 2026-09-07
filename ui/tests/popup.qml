@@ -134,7 +134,25 @@ ShellRoot {
                 capture.cancel(); check(capture.pendingClose, "Cancel lost protection before actual release"); return true;
             },
             function() { if (compositor && (capture.editing || typer.running)) return false; return true; },
-            function() { console.log("INLINE_PASS", compositor ? "real compositor inhibition, focus, keymap and keyboard events" : "isolated UI"); panel.open = false; Qt.quit(); return true; }
+            function() { if (compositor) begin(); return true; },
+            function() {
+                if (!compositor) return true;
+                if (!capture.protectedInput) return false;
+                typer.command = ["wtype", "-P", "Super_L", "-M", "logo", "-P", "F11", "-s", "250", "-p", "F11", "-m", "logo", "-p", "Super_L"];
+                typer.running = true; return true;
+            },
+            function() {
+                if (!compositor) return true;
+                if (!capture.canSave || typer.running) return false;
+                check(capture.candidate === "SUPER + F11", "Super+F11 captured incorrectly: " + capture.candidate);
+                find(recorder, node => node.text === "Save").clicked(); return true;
+            },
+            function() {
+                if (!compositor) return true;
+                if (capture.editing || model.loading) return false;
+                check(panel.open && model.data.settings.shortcut === "SUPER + F11", "Super+F11 did not save in place"); return true;
+            },
+            function() { console.log("INLINE_PASS", compositor ? "installed plugin layout; actual Super+F11 capture and Save; focus and release gating" : "isolated UI"); panel.open = false; Qt.quit(); return true; }
         ];
         if (failure) {
             steps = [steps[0], function() { feed.phase = "idle"; panel.open = true; begin(); return true; },
@@ -157,6 +175,7 @@ ShellRoot {
                         release(Qt.Key_Shift, 50); check(!capture.editing, "Timeout cancel did not finish"); return true;
                     }
                     if (capture.phase !== "recording" || !capture.error) return false;
+                    if (failure === "lookup-timeout") check(capture.error.includes("timed out"), "Expected a lookup timeout: " + capture.error);
                     release(); check(!capture.canSave, "Failed key lookup enabled Save");
                     press(); return true;
                 },

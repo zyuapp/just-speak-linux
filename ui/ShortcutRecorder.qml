@@ -87,7 +87,10 @@ Column {
                 Component.onCompleted: {
                     const request = root.resolution;
                     generation = request.generation;
-                    process.command = ["gjs", "-m", decodeURIComponent(Qt.resolvedUrl("../gtk/shortcut-keymap.js").toString().replace(/^file:\/\//, "")), String(request.code), String(request.key)];
+                    // The CLI owns the helper. Qt.resolvedUrl can return a
+                    // virtual qs: URL, and Omarchy loads plugins via symlinks.
+                    process.command = [root.menuModel.feed.executable, "shortcut", "resolve-key",
+                        String(request.code), String(request.key)];
                     process.running = true;
                 }
                 Process {

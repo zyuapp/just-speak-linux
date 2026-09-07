@@ -138,7 +138,16 @@ enum SettingsCommand {
 }
 #[derive(Subcommand)]
 enum ShortcutCommand {
-    Set { shortcut: String },
+    Set {
+        shortcut: String,
+    },
+    /// Resolve a key captured by the desktop interface, without opening a window.
+    #[command(hide = true)]
+    ResolveKey {
+        #[arg(value_parser = clap::value_parser!(u32).range(8..=65535))]
+        code: u32,
+        key: u32,
+    },
 }
 #[derive(Subcommand)]
 enum HistoryCommand {
@@ -354,6 +363,18 @@ fn control_command(command: &Commands) -> Option<Result<()>> {
         } => control(Request::SetShortcut {
             shortcut: shortcut.clone(),
         }),
+        Commands::Shortcut {
+            command: ShortcutCommand::ResolveKey { code, key },
+        } => {
+            use std::os::unix::process::CommandExt;
+            Err(Command::new("gjs")
+                .arg("-c")
+                .arg(include_str!("../gtk/shortcut-keymap.js"))
+                .arg(code.to_string())
+                .arg(key.to_string())
+                .exec())
+            .context("Resolve shortcut key (requires GJS and GTK4)")
+        }
         Commands::History { command } => control(match command {
             HistoryCommand::Copy { id } => Request::HistoryCopy { id: id.clone() },
             HistoryCommand::Paste { id } => Request::HistoryPaste { id: id.clone() },

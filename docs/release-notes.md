@@ -1,14 +1,11 @@
-Version 0.2.9 adds an in-app setup screen when the speech model is missing.
-Download the English model (~483 MB), follow download, verification, unpacking
-and loading progress, and retry if the download fails. Setup continues when the
-window closes and enables dictation automatically when the model is ready.
-The Omarchy bar opens the same setup screen.
+Version 0.2.10 fixes shortcut capture in the installed Omarchy popup, including
+Super + F11. The popup previously tried to launch a helper through a QML URL
+that did not point to a real file after plugin loading.
 
-This release also includes inline shortcut recording in the Omarchy popup:
-record, preview, save and cancel without opening another window. Completed
-previews survive focus changes, held keys are released before saving or
-canceling, and conflicts can be corrected in place.
+The JustSpeak executable now contains the keymap helper and runs it directly.
+Capture and Save are verified through the installed plugin's symlink layout,
+including real Super + F11 input. The release checks also exercise a relocated
+executable with no frontend files and invalid local settings.
 
-The release fixes the missing Qt test dependency that blocked v0.2.8 from
-publishing. Existing models, history, settings and shortcuts are preserved,
-and the update remains compatible with older JustSpeak clients.
+Existing shortcuts, speech models, history and first-run model setup are
+preserved. Shortcut recording stays inline in the Omarchy popup.

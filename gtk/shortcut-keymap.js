@@ -1,7 +1,11 @@
-// Read the compositor's keymap without creating or focusing a window.
-import Gtk from 'gi://Gtk?version=4.0';
-import Gdk from 'gi://Gdk?version=4.0';
-import System from 'system';
+// Read the compositor's keymap without creating or focusing a window. This
+// classic GJS script is also embedded in the CLI and run with gjs -c, so lookup
+// never depends on the shell's virtual URLs or the installation's symlinks.
+imports.gi.versions.Gtk = '4.0';
+imports.gi.versions.Gdk = '4.0';
+const Gtk = imports.gi.Gtk;
+const Gdk = imports.gi.Gdk;
+const System = imports.system;
 
 const special = new Map([
     ['Escape', 0x01000000], ['Tab', 0x01000001], ['ISO_Left_Tab', 0x01000002],
@@ -13,7 +17,7 @@ const special = new Map([
 ]);
 for (let n = 1; n <= 35; n++) special.set(`F${n}`, 0x01000030 + n - 1);
 
-export function qtKey(keyval) {
+function qtKey(keyval) {
     const name = Gdk.keyval_name(keyval);
     if (special.has(name)) return special.get(name);
     const unicode = Gdk.keyval_to_unicode(keyval);
@@ -22,7 +26,7 @@ export function qtKey(keyval) {
     return [...upper].length === 1 ? upper.codePointAt(0) : 0;
 }
 
-export function resolveKey(display, code, key) {
+function resolveKey(display, code, key) {
     if (!Number.isInteger(code) || code < 8 || code > 65535 || !key)
         throw new Error('This key has no usable hardware code. Try another key.');
     // Function/navigation keys have layout-independent names. A virtual or

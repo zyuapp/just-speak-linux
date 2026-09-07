@@ -30,8 +30,9 @@ GNOME behavior has not been verified.
 
 In the desktop window, choose **Record shortcut…** to press a shortcut instead of typing its name.
 The Omarchy bar records inline in its popup using Quickshell shortcut inhibition;
-it uses the headless `shortcut-keymap.js` helper for layout translation and does
-not launch this desktop window.
+it calls `just-speak shortcut resolve-key` for headless layout translation. The
+CLI embeds `shortcut-keymap.js`, so lookup also works when the plugin is loaded
+through symlinks or Quickshell virtual URLs. It does not launch this window.
 `just-speak window --record-shortcut` opens the same recorder, including when
 the desktop window is already running. The dialog waits for compositor shortcut
 inhibition and focus before accepting input. It supports function keys,

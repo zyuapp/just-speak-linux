@@ -1,5 +1,8 @@
 import Gdk from 'gi://Gdk?version=4.0';
-import {resolveKey, qtKey} from '../shortcut-keymap.js';
+import GLib from 'gi://GLib';
+import System from 'system';
+imports.searchPath.unshift(GLib.build_filenamev([GLib.path_get_dirname(System.programPath), '..']));
+const {resolveKey, qtKey} = imports['shortcut-keymap'];
 
 function assert(value, message) { if (!value) throw new Error(message); }
 function rejected(fn) { try { fn(); } catch (_) { return; } throw new Error('Expected rejection'); }
