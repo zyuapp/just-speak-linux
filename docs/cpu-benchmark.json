@@ -1,0 +1,82 @@
+{
+  "date": "2026-09-06",
+  "cpu": "AMD Ryzen 5 5600H (6 cores, 12 threads)",
+  "ram": "30 GiB reported by Linux",
+  "model": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
+  "runtime": "sherpa-onnx 1.13.7 CPU static runtime",
+  "fixture": {
+    "source": "model archive test_wavs/0.wav",
+    "source_sha256": "5fceacff0315d49cb59fcc505bcecf1ed5f2f35c2897b1e65a59f30e5d922150",
+    "source_seconds": 7.435,
+    "repetitions": 8,
+    "description": "59.48 seconds, constructed by concatenating real speech; not a naturally spoken minute"
+  },
+  "threshold": "20x on the slowest of two resident runs; loading and first inference reported separately",
+  "results": [
+    {
+      "audio_seconds": 59.48,
+      "model_load_seconds": 3.692599816,
+      "first_inference_seconds": 11.316405137,
+      "resident_inference_seconds": [
+        8.728299714,
+        8.732185317
+      ],
+      "slowest_resident_speed": 6.81158242074903,
+      "minimum_speed": 20.0,
+      "threshold_met": false,
+      "num_threads": 1
+    },
+    {
+      "audio_seconds": 59.48,
+      "model_load_seconds": 2.020081051,
+      "first_inference_seconds": 5.312100675,
+      "resident_inference_seconds": [
+        5.314947461,
+        5.332149883
+      ],
+      "slowest_resident_speed": 11.154975254846939,
+      "minimum_speed": 20.0,
+      "threshold_met": false,
+      "num_threads": 2
+    },
+    {
+      "audio_seconds": 59.48,
+      "model_load_seconds": 2.139077859,
+      "first_inference_seconds": 3.80203596,
+      "resident_inference_seconds": [
+        3.771071026,
+        3.781178416
+      ],
+      "slowest_resident_speed": 15.730545733655747,
+      "minimum_speed": 20.0,
+      "threshold_met": false,
+      "num_threads": 4
+    },
+    {
+      "audio_seconds": 59.48,
+      "model_load_seconds": 2.070788208,
+      "first_inference_seconds": 3.410635782,
+      "resident_inference_seconds": [
+        3.414578659,
+        3.440319964
+      ],
+      "slowest_resident_speed": 17.28908956794927,
+      "minimum_speed": 20.0,
+      "threshold_met": false,
+      "num_threads": 6
+    },
+    {
+      "audio_seconds": 59.48,
+      "model_load_seconds": 2.028842214,
+      "first_inference_seconds": 3.889670089,
+      "resident_inference_seconds": [
+        3.902669404,
+        3.917374494
+      ],
+      "slowest_resident_speed": 15.183638963061057,
+      "minimum_speed": 20.0,
+      "threshold_met": false,
+      "num_threads": 8
+    }
+  ]
+}

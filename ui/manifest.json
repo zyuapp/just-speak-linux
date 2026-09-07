@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "local.just-speak",
+  "name": "JustSpeak",
+  "version": "0.1.0",
+  "author": "JustSpeak contributors",
+  "description": "Local push-to-talk dictation status and controls",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "Widget.qml" },
+  "barWidget": {
+    "displayName": "JustSpeak",
+    "description": "Left click starts/stops dictation; right click cancels",
+    "category": "Audio",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}

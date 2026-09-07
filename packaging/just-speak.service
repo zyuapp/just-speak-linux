@@ -1,0 +1,17 @@
+[Unit]
+Description=JustSpeak local push-to-talk dictation
+After=graphical-session.target pipewire.service
+PartOf=graphical-session.target
+Wants=pipewire.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/just-speak daemon
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+UMask=0077
+Environment=PATH=/usr/local/bin:/usr/bin
+
+[Install]
+WantedBy=graphical-session.target

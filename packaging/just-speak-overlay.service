@@ -1,0 +1,15 @@
+[Unit]
+Description=JustSpeak recording overlay
+After=graphical-session.target just-speak.service
+PartOf=graphical-session.target
+Wants=just-speak.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/quickshell --no-duplicate --path /usr/share/just-speak/ui
+Restart=on-failure
+RestartSec=3
+Environment=PATH=/usr/local/bin:/usr/bin
+
+[Install]
+WantedBy=graphical-session.target
