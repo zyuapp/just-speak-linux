@@ -8,7 +8,8 @@ import {Backend, sampleMenu, delay} from './backend.js';
 const visibleSmoke = ARGV.includes('--smoke-test-visible');
 const smoke = visibleSmoke || ARGV.includes('--smoke-test');
 const app = new Gtk.Application({application_id: smoke ? 'io.github.zyuapp.JustSpeak.Smoke' : 'io.github.zyuapp.JustSpeak',
-    flags: smoke ? Gio.ApplicationFlags.NON_UNIQUE : Gio.ApplicationFlags.DEFAULT_FLAGS});
+    // FLAGS_NONE works with Ubuntu 22.04's GLib 2.72; DEFAULT_FLAGS needs 2.74.
+    flags: smoke ? Gio.ApplicationFlags.NON_UNIQUE : Gio.ApplicationFlags.FLAGS_NONE});
 const backend = new Backend(smoke);
 let window;
 let smokeExit = 0;

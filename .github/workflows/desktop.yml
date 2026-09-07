@@ -1,0 +1,27 @@
+name: Check GTK desktop interface
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gtk-ubuntu-22-04:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install GTK test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes gjs gir1.2-gtk-4.0 xvfb dbus-x11
+      - name: Construct the GTK window with synthetic data
+        env:
+          G_DEBUG: fatal-criticals
+        run: timeout 30s xvfb-run -a dbus-run-session -- gjs -m gtk/main.js --smoke-test
+
+# This checks GTK/GJS compatibility. It does not test GNOME shortcuts,
+# automatic paste, audio capture, or updates, and produces no release artifacts.
