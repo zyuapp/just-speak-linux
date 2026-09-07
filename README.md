@@ -53,6 +53,13 @@ Open **JustSpeak** from your application launcher, run `just-speak window`, or
 click its Omarchy bar icon. The service keeps the speech model loaded after the
 window closes.
 
+If the speech model is missing (for example, after installing with `--no-model`),
+the window offers **Download model (~483 MB)**. Click **Start JustSpeak** first
+if the service is stopped. Setup shows download, verification, unpacking, and
+loading progress; it continues when the window closes and enables dictation
+automatically when ready. A failed download offers **Retry download**. The
+Omarchy bar's **Set up speech model…** button opens the same setup screen.
+
 - Choose a microphone by its stable PipeWire name, or follow the system default.
 - Review the last ten transcripts, copy or paste an entry, or clear history.
 - Record a shortcut by pressing its keys on supported Hyprland Lua desktops.

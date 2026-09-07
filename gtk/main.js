@@ -5,6 +5,7 @@ import Pango from 'gi://Pango';
 import System from 'system';
 import {Backend, sampleMenu, delay} from './backend.js';
 import {ShortcutRecorder} from './shortcut-recorder.js';
+import {ModelSetup} from './model-setup.js';
 
 const visibleSmoke = ARGV.includes('--smoke-test-visible');
 const smoke = visibleSmoke || ARGV.includes('--smoke-test');
@@ -63,7 +64,7 @@ function showNotice(text) {
     controls.message.label = text;
     controls.message.visible = Boolean(text);
 }
-function recording() { return ['recording', 'transcribing', 'updating'].includes(status.phase); }
+function recording() { return ['recording', 'transcribing', 'updating', 'loading'].includes(status.phase); }
 function canEdit() { return !busy && !installing && !recording() && status.phase !== 'disconnected' && Boolean(metadata.version); }
 function capabilities() { return metadata.desktop || {}; }
 
@@ -72,13 +73,18 @@ function renderStatus() {
     switch (status.phase) {
     case 'recording': text = `Listening · ${Math.floor(status.elapsed_seconds || 0)}s`; break;
     case 'transcribing': text = 'Transcribing locally…'; break;
-    case 'loading': text = 'Loading speech model…'; break;
+    case 'loading': text = status.message || 'Loading speech model…'; break;
     case 'updating': text = status.message || 'Updating JustSpeak…'; break;
-    case 'error': text = status.message || 'JustSpeak needs attention'; break;
+    case 'error': text = status.model_setup === 'required' ? 'Welcome to JustSpeak'
+        : status.model_setup === 'failed' ? 'Model download needs attention'
+        : status.message || 'JustSpeak needs attention'; break;
     case 'disconnected': text = 'JustSpeak is stopped'; break;
     default: text = status.model_ready ? 'Ready to dictate' : 'Speech model not ready';
     }
     controls.status.label = text;
+    controls.modelSetup.render(status, busy || installing || Boolean(recorder));
+    controls.start.visible = !controls.modelSetup.widget.visible;
+    controls.desktop.visible = !controls.modelSetup.widget.visible;
     controls.start.label = status.phase === 'disconnected' ? 'Start JustSpeak'
         : status.phase === 'recording' ? 'Finish dictation' : 'Start dictation';
     controls.start.tooltip_text = capabilities().automatic_paste
@@ -96,7 +102,7 @@ function renderStatus() {
     controls.clear.sensitive = canEdit() && metadata.history.length > 0;
     controls.history.sensitive = canEdit();
     controls.restart.sensitive = !busy && !installing && !recording();
-    controls.quit.sensitive = !busy && !installing && status.phase !== 'disconnected';
+    controls.quit.sensitive = !busy && !installing && !recording() && status.phase !== 'disconnected';
     controls.install.sensitive = !busy && !installing && !recording() && !checking;
     for (const [key, control] of switches) control.sensitive = canEdit()
         && (key !== 'paste' || capabilities().automatic_paste === true);
@@ -288,6 +294,8 @@ function buildWindow(application) {
     controls.status = label('Connecting…', {wrap: true});
     controls.status.add_css_class('title-2');
     content.append(controls.status);
+    controls.modelSetup = new ModelSetup({setup: () => mutate(['model', 'setup']), onError: showError});
+    content.append(controls.modelSetup.widget);
     controls.desktop = label('', {wrap: true, max_width_chars: 58});
     content.append(controls.desktop);
     controls.experimental = label('This desktop integration is experimental. GNOME behavior has not been verified.', {wrap: true});
@@ -370,11 +378,39 @@ app.connect('activate', () => {
         status.phase = 'updating';
         renderStatus();
         if (controls.start.sensitive || controls.input.sensitive) throw new Error('Update mutation gate failed');
-        print('GTK_SMOKE_COMPLETE: window, plain-text history, settings, desktop capabilities, update gate; no external actions');
-        } catch (error) { smokeExit = 1; printerr(error.stack || error.message); }
+        status = {phase: 'error', model_ready: false, model_setup: 'required'};
+        renderStatus();
+        if (!controls.modelSetup.widget.visible || !controls.modelSetup.button.sensitive || controls.start.visible)
+            throw new Error('Missing model setup was not offered');
+        for (const stage of ['downloading', 'verifying', 'extracting', 'loading']) {
+            status = {phase: 'loading', model_ready: false, model_setup: stage, message: 'Setup progress'};
+            renderStatus();
+            if (!controls.modelSetup.spinner.spinning || controls.modelSetup.button.sensitive || controls.start.sensitive
+                || controls.restart.sensitive || controls.quit.sensitive || controls.install.sensitive || controls.input.sensitive)
+                throw new Error(`Model setup mutation gate failed: ${stage}`);
+        }
+        status = {phase: 'error', model_ready: false, model_setup: 'failed', message: 'Download failed <b>plain text</b>'};
+        renderStatus();
+        if (!controls.modelSetup.button.sensitive || controls.modelSetup.button.label !== 'Retry download'
+            || controls.modelSetup.details.use_markup || controls.modelSetup.spinner.spinning)
+            throw new Error('Model setup retry state failed');
+        status = {phase: 'idle', model_ready: true};
+        renderStatus();
+        if (controls.modelSetup.widget.visible || !controls.start.visible || !controls.start.sensitive)
+            throw new Error('Model ready state did not enable dictation');
+        status = {phase: 'disconnected', model_ready: false};
+        renderStatus();
+        if (controls.modelSetup.widget.visible || !controls.start.sensitive || controls.start.label !== 'Start JustSpeak')
+            throw new Error('Stopped service cannot be started for setup');
+        print('GTK_SMOKE_COMPLETE: window, history, settings, desktop capabilities, update and model setup gates, progress, retry; no external actions');
+        } catch (error) { smokeExit = 1; printerr(`${error.message}\n${error.stack || ''}`); }
         if (visibleSmoke && smokeExit === 0) {
             metadata = JSON.parse(JSON.stringify(sampleMenu));
             status = {phase: 'idle', model_ready: true, can_cancel: false, shortcut: 'F10'};
+            if (ARGV.includes('--smoke-model-setup')) {
+                metadata.history = [];
+                status = {phase: 'error', model_ready: false, model_setup: 'required', shortcut: 'F10'};
+            }
             renderMenu();
             window.present();
             print('GTK_VISUAL_READY: synthetic content only');

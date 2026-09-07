@@ -109,6 +109,30 @@ Ui.KeyboardPanel {
                     color: root.menuModel.error ? "#e7ae83" : Color.popups.text
                 }
 
+                Column {
+                    width: parent.width
+                    spacing: Style.space(8)
+                    visible: root.feed.modelSetup !== "" && !root.feed.modelReady
+                    Text {
+                        width: parent.width
+                        text: ["required", "failed"].includes(root.feed.modelSetup)
+                            ? "Download the English speech model once (~483 MB) to start dictating offline."
+                            : root.feed.message + " You can close this menu while setup continues."
+                        textFormat: Text.PlainText
+                        wrapMode: Text.Wrap
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        color: Color.popups.text
+                    }
+                    Ui.Button {
+                        text: ["required", "failed"].includes(root.feed.modelSetup) ? "Set up speech model…" : "View setup progress…"
+                        focusable: true
+                        bordered: true
+                        enabled: !root.recordingShortcut && !root.menuModel.busy && !root.updateModel.installing
+                        onClicked: { root.feed.act("window"); root.close(); }
+                    }
+                }
+
                 Row {
                     width: parent.width
                     spacing: Style.space(8)
@@ -377,7 +401,7 @@ Ui.KeyboardPanel {
                     Ui.Button {
                         id: quitButton
                         text: "Quit"
-                        enabled: !root.recordingShortcut && !root.menuModel.busy && !root.updateModel.installing && root.feed.phase !== "disconnected"
+                        enabled: !root.recordingShortcut && !root.menuModel.busy && !root.menuModel.recording && !root.updateModel.installing && root.feed.phase !== "disconnected"
                         opacity: enabled ? 1 : 0.4
                         focusable: true
                         onClicked: { root.menuModel.run(["quit"], "JustSpeak stopped"); root.close(); }

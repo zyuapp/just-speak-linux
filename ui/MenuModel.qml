@@ -15,7 +15,7 @@ Scope {
     property string actionErrors: ""
     property string readErrors: ""
     property string successMessage: ""
-    readonly property bool recording: ["recording", "transcribing", "updating"].includes(feed.phase)
+    readonly property bool recording: ["recording", "transcribing", "updating", "loading"].includes(feed.phase)
     readonly property bool canEdit: ready && !busy && !recording && feed.phase !== "disconnected"
     readonly property var inputs: {
         let options = [{ value: "default", label: "System default microphone" }];

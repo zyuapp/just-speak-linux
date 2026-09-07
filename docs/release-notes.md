@@ -1,12 +1,14 @@
-Version 0.2.8 records your hold-to-talk shortcut directly in the Omarchy bar
-popup. Record, preview, Save and Cancel stay together without opening a settings
-window.
+Version 0.2.9 adds an in-app setup screen when the speech model is missing.
+Download the English model (~483 MB), follow download, verification, unpacking
+and loading progress, and retry if the download fails. Setup continues when the
+window closes and enables dictation automatically when the model is ready.
+The Omarchy bar opens the same setup screen.
 
-The recorder waits for desktop shortcut protection, keeps completed previews
-across focus changes, and waits for held keys to release before saving or
-canceling. Occupied shortcuts show an error in place so you can record again.
-Keyboard navigation, keymap lookup failures, and recording timeouts are covered
-by regression checks. Function keys also work with virtual keyboards.
+This release also includes inline shortcut recording in the Omarchy popup:
+record, preview, save and cancel without opening another window. Completed
+previews survive focus changes, held keys are released before saving or
+canceling, and conflicts can be corrected in place.
 
-This release retains the existing GTK recorder and OTA compatibility with older
-clients. Existing models, history, settings and shortcuts are preserved.
+The release fixes the missing Qt test dependency that blocked v0.2.8 from
+publishing. Existing models, history, settings and shortcuts are preserved,
+and the update remains compatible with older JustSpeak clients.

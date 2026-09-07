@@ -10,6 +10,14 @@ model_url="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${
 # https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/283097678
 model_sha256='157c157bc51155e03e37d2466522a3a737dd9c72bb25f36eb18912964161e1ad'
 
+# The background service supplies a private file for coarse progress updates.
+# Ordinary command-line downloads retain curl's terminal progress meter.
+progress() {
+    if [[ -n ${JUST_SPEAK_MODEL_PROGRESS_FILE:-} ]]; then
+        printf '%s\n' "$1" > "$JUST_SPEAK_MODEL_PROGRESS_FILE"
+    fi
+}
+
 usage() {
     printf 'Usage: %s [MODEL_DIRECTORY]\n' "$0"
     printf 'Downloads and verifies Parakeet TDT 0.6B v2 INT8 (about 483 MB download, 661 MB installed).\n'
@@ -64,14 +72,19 @@ trap 'rm -rf -- "$staging"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 printf 'Downloading Parakeet TDT 0.6B v2 INT8 from the official sherpa-onnx release…\n'
+progress downloading
+curl_flags=()
+if [[ -n ${JUST_SPEAK_MODEL_PROGRESS_FILE:-} ]]; then curl_flags=(--silent --show-error); fi
 curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
-    --retry 3 --connect-timeout 20 --output "$staging/$archive_name" "$model_url"
+    --retry 3 --connect-timeout 20 "${curl_flags[@]}" --output "$staging/$archive_name" "$model_url"
+progress verifying
 printf '%s  %s\n' "$model_sha256" "$staging/$archive_name" | sha256sum --check --status || {
     printf 'Model archive SHA256 verification failed; nothing was installed.\n' >&2
     exit 1
 }
 
 printf 'Checksum verified; extracting model…\n'
+progress extracting
 python3 - "$staging/$archive_name" "$staging" "$model_name" <<'PY'
 import pathlib, shutil, sys, tarfile
 

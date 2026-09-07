@@ -31,7 +31,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes build-essential cmake curl python3 binutils lua5.4 gjs gir1.2-gtk-4.0 xvfb dbus-x11 qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript
+          sudo apt-get install --yes build-essential cmake curl python3 binutils lua5.4 gjs gir1.2-gtk-4.0 xvfb dbus-x11 qt6-declarative-dev-tools qt6-qpa-plugins qml6-module-qttest qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript
           rustup toolchain install 1.88.0 --profile minimal --component clippy,rustfmt
           rustup default 1.88.0
       - name: Check source
@@ -77,6 +77,7 @@ jobs:
         run: |
           scripts/download-model.sh "$JUST_SPEAK_TEST_MODEL_DIR"
           cargo test --locked real_model_recognizes_fixture_and_reuses_engine -- --ignored
+          python3 scripts/test-model-setup.py --binary target/release/just-speak --model-dir "$JUST_SPEAK_TEST_MODEL_DIR"
           python3 scripts/smoke-test.py --binary target/release/just-speak --model-dir "$JUST_SPEAK_TEST_MODEL_DIR"
           target/release/just-speak --model-dir "$JUST_SPEAK_TEST_MODEL_DIR" transcribe "$JUST_SPEAK_TEST_MODEL_DIR/test_wavs/0.wav" > "$RUNNER_TEMP/transcript.txt"
           python3 - <<'PY'

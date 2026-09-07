@@ -7,6 +7,7 @@ mod feedback;
 mod history;
 mod inference;
 mod inputs;
+mod model_download;
 mod protocol;
 mod shortcut;
 mod ui_refresh;
@@ -174,6 +175,8 @@ enum UpdateCommand {
 enum ModelCommand {
     /// Download and SHA256-verify the pinned model (separate from application updates).
     Download,
+    /// Download and load the missing model in the running service.
+    Setup,
     /// Print the configured model path.
     Path,
 }
@@ -291,6 +294,7 @@ fn run() -> Result<()> {
                 Ok(())
             }
             ModelCommand::Download => download_model(&config.model_dir()?),
+            ModelCommand::Setup => unreachable!("handled as a service command"),
         },
         Commands::Transcribe { file } => {
             let mut engine = inference::Engine::load(&config.model_dir()?, config.num_threads)?;
@@ -327,6 +331,9 @@ fn control_command(command: &Commands) -> Option<Result<()>> {
         Commands::Window { record_shortcut } => open_window(*record_shortcut),
         Commands::Restart => restart_service(),
         Commands::Menu { json: _ } => menu(),
+        Commands::Model {
+            command: ModelCommand::Setup,
+        } => control(Request::SetupModel {}),
         Commands::Input {
             command: InputCommand::Set { id },
         } => control(Request::SetInput {
@@ -440,8 +447,13 @@ fn user_service(action: &str) -> Result<()> {
 fn restart_service() -> Result<()> {
     if let Ok(response) = protocol::call(&config::socket_path()?, Request::Status {}) {
         ensure!(
-            !response.status.can_cancel && response.status.phase != protocol::Phase::Updating,
-            "Finish or cancel dictation before restarting"
+            !response.status.can_cancel
+                && response.status.phase != protocol::Phase::Updating
+                && !response
+                    .status
+                    .model_setup
+                    .is_some_and(protocol::ModelSetup::is_busy),
+            "Wait for model setup or finish dictation before restarting"
         );
     }
     user_service("restart")

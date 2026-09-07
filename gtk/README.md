@@ -9,6 +9,13 @@ prefers `~/.local/bin/just-speak` and then searches PATH. Closing the window lea
 the dictation service running. Reopening the launcher activates the existing
 window when it is still running.
 
+When no model is installed, the window offers a one-time download with the size
+and source shown before starting. `just-speak model setup` asks the service to
+download, verify, unpack, and load the model. Status updates carry `model_setup`
+stages so closing and reopening the window preserves progress and failures can
+be retried. The existing `just-speak model download` command remains a standalone
+download for installers. Existing invalid model directories are preserved.
+
 Microphones, settings, history, and desktop capabilities come from
 `just-speak menu --json`. The window polls status without blocking GTK and avoids
 overlapping polls. Transcript buttons send history IDs to the service, never
@@ -56,6 +63,13 @@ for updates. GTK still needs a display connection to initialize.
 
 For visual checks, `--smoke-test-visible` shows the same synthetic window for
 eight seconds and exits. Its backend remains disabled for all external actions.
+Add `--smoke-model-setup` to preview the missing-model screen. The smoke checks
+also cover setup progress, retry, blocked actions, and transition to dictation.
+
+`python3 scripts/test-model-setup.py --binary target/debug/just-speak` checks an
+isolated first-run daemon with synthetic download failures and retries. Add
+`--model-dir models/parakeet-tdt-0.6b-v2-int8` to also verify that setup loads a
+real model automatically. It never downloads or accesses desktop services.
 
 Additional checks:
 

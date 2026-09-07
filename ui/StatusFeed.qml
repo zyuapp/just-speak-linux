@@ -13,13 +13,16 @@ Scope {
     property string message: "Start the JustSpeak service to connect."
     property real elapsedSeconds: 0
     property bool modelReady: false
+    property string modelSetup: ""
     property bool canCancel: false
     property string shortcut: "F10"
     readonly property string label: {
         if (phase === "recording") return "Listening · " + Math.floor(elapsedSeconds) + "s";
         if (phase === "transcribing") return "Transcribing…";
-        if (phase === "loading") return "Loading speech model…";
+        if (phase === "loading") return message || "Loading speech model…";
         if (phase === "updating") return message || "Updating JustSpeak…";
+        if (phase === "error" && modelSetup === "required") return "Set up offline dictation";
+        if (phase === "error" && modelSetup === "failed") return "Model download needs attention";
         if (phase === "error") return "JustSpeak needs attention";
         if (phase === "disconnected") return "JustSpeak is offline";
         return modelReady ? "Ready · hold " + shortcut + " to speak" : "Speech model not ready";
@@ -33,6 +36,7 @@ Scope {
             message = typeof state.message === "string" ? state.message : "";
             elapsedSeconds = typeof state.elapsed_seconds === "number" ? Math.max(0, state.elapsed_seconds) : 0;
             modelReady = state.model_ready === true;
+            modelSetup = typeof state.model_setup === "string" ? state.model_setup : "";
             canCancel = state.can_cancel === true || state.phase === "recording" || state.phase === "transcribing";
             if (typeof state.shortcut === "string" && state.shortcut.length > 0) shortcut = state.shortcut;
             phase = state.phase;
@@ -69,6 +73,7 @@ Scope {
                 root.phase = "disconnected";
                 root.message = "Start the JustSpeak service to connect.";
                 root.modelReady = false;
+                root.modelSetup = "";
                 root.canCancel = false;
             }
         }

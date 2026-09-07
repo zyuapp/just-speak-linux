@@ -16,6 +16,7 @@ pub enum Request {
     Status {},
     Watch {},
     Menu {},
+    SetupModel {},
     SetInput { input: Option<String> },
     SetOption { key: String, value: bool },
     SetShortcut { shortcut: String },
@@ -38,12 +39,31 @@ pub enum Phase {
     Updating,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelSetup {
+    Required,
+    Downloading,
+    Verifying,
+    Extracting,
+    Loading,
+    Failed,
+}
+
+impl ModelSetup {
+    pub fn is_busy(self) -> bool {
+        !matches!(self, Self::Required | Self::Failed)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
     pub phase: Phase,
     pub message: Option<String>,
     pub elapsed_seconds: Option<f64>,
     pub model_ready: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_setup: Option<ModelSetup>,
     pub can_cancel: bool,
     #[serde(default)]
     pub shortcut: String,
@@ -56,6 +76,7 @@ impl Default for Status {
             message: Some("Loading the speech model".into()),
             elapsed_seconds: None,
             model_ready: false,
+            model_setup: None,
             can_cancel: false,
             shortcut: "F10".into(),
         }

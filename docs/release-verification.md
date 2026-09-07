@@ -1,5 +1,27 @@
 # Version 0.2 release verification
 
+## First-run speech model setup (0.2.9)
+
+The shared GTK window offers an explicit model download, stage progress, and
+retry after failure. The service owns the download and loads the model when it
+finishes, so closing the window does not interrupt setup. The Omarchy popup
+links to the same screen. Existing invalid model directories are preserved.
+
+Local checks passed 60 ordinary Rust tests, strict Clippy, formatting, shell
+syntax, and GTK setup states/action gates. An isolated daemon test verified
+missing-model detection, explicit consent to download, independent client
+connections, duplicate-request rejection, failed downloads and retries, and
+automatic loading of the existing real model after simulated delivery. The
+real-model dictation smoke suite passed on rerun after one transient CLI-status
+failure in its audio-feedback check. Tests use synthetic downloads and desktop
+helpers; they do not access the user's microphone or clipboard.
+
+The v0.2.8 release job failed before building because Ubuntu's Qt offscreen
+platform plugin was absent. Version 0.2.9 explicitly installs `qt6-qpa-plugins`
+and retains the inline shortcut capture changes and their tests. The tagged
+workflow gates publication on Ubuntu GTK, native/ABI checks, first-run setup,
+real-model dictation, and acceptance by the published v0.2.3 updater.
+
 ## Inline Omarchy shortcut recorder (0.2.8)
 
 The Omarchy popup now captures, previews, saves and cancels shortcuts inline.

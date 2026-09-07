@@ -5,8 +5,8 @@ use crate::{
     feedback::Feedback,
     history::History,
     inference::Engine,
-    inputs,
-    protocol::{self, Phase, Request, Response, Status},
+    inputs, model_download,
+    protocol::{self, ModelSetup, Phase, Request, Response, Status},
     shortcut,
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -32,6 +32,8 @@ enum Event {
     Request(Request, Sender<Response>),
     Watch(SyncSender<Status>),
     Loaded(Result<()>),
+    ModelProgress(ModelSetup),
+    ModelDownloadFailed(anyhow::Error),
     Prepared(u64, Result<(Recorder, Option<PasteTarget>)>, Feedback),
     Recorded(u64, Result<Recording>, Feedback),
     FeedbackReady(Feedback),
@@ -41,6 +43,7 @@ enum Event {
 }
 
 enum Work {
+    SetupModel,
     Transcribe(u64, Recording),
     Shutdown,
 }
@@ -253,6 +256,21 @@ impl Service {
             Request::Stop {} => self.stop(),
             Request::Cancel {} => self.cancel(),
             Request::Status {} | Request::Watch {} | Request::Menu {} => {}
+            Request::SetupModel {} => {
+                self.require_idle()?;
+                ensure!(
+                    !self.status.model_ready
+                        && matches!(
+                            self.status.model_setup,
+                            Some(ModelSetup::Required | ModelSetup::Failed)
+                        ),
+                    "Speech model setup is not needed or is already running"
+                );
+                self.worker
+                    .send(Work::SetupModel)
+                    .context("model worker stopped")?;
+                self.model_progress(ModelSetup::Downloading);
+            }
             Request::SetInput { input } => {
                 self.require_idle()?;
                 if let Some(id) = &input {
@@ -439,11 +457,32 @@ impl Service {
                 match result {
                     Ok(()) => {
                         self.status.model_ready = true;
+                        self.status.model_setup = None;
                         self.idle(None);
                         eprintln!("JustSpeak: model loaded; ready");
                     }
-                    Err(error) => self.fail(format!("Cannot load model: {error:#}. Run `just-speak model download`, then restart the service.")),
+                    Err(error) => {
+                        let missing = self.config.model_dir().is_ok_and(|path| {
+                            fs::symlink_metadata(path)
+                                .is_err_and(|error| error.kind() == ErrorKind::NotFound)
+                        });
+                        self.status.model_setup = missing.then_some(ModelSetup::Required);
+                        if missing {
+                            self.fail("Download the speech model to start dictating.");
+                        } else {
+                            self.fail(format!("Cannot load model: {error:#}. Check the model files, then restart JustSpeak."));
+                        }
+                    }
                 }
+                self.broadcast();
+            }
+            Event::ModelProgress(stage) => {
+                self.model_progress(stage);
+                self.broadcast();
+            }
+            Event::ModelDownloadFailed(error) => {
+                self.status.model_setup = Some(ModelSetup::Failed);
+                self.fail(format!("Model download failed: {error:#}"));
                 self.broadcast();
             }
             Event::FeedbackReady(feedback) => {
@@ -520,6 +559,19 @@ impl Service {
                 self.broadcast();
             }
         }
+    }
+    fn model_progress(&mut self, stage: ModelSetup) {
+        self.status.model_setup = Some(stage);
+        self.status.phase = Phase::Loading;
+        self.status.message = Some(
+            match stage {
+                ModelSetup::Verifying => "Verifying the speech model…",
+                ModelSetup::Extracting => "Unpacking the speech model…",
+                ModelSetup::Loading => "Loading the speech model…",
+                _ => "Downloading the speech model…",
+            }
+            .into(),
+        );
     }
 }
 
@@ -624,29 +676,52 @@ fn inference_worker(
     events: Sender<Event>,
     current: Arc<AtomicU64>,
     receiver: Receiver<Work>,
+    shutdown: Arc<AtomicBool>,
 ) -> Result<()> {
-    let mut engine = match config
+    let load = || match config
         .model_dir()
         .and_then(|path| Engine::load(&path, config.num_threads))
     {
-        Ok(engine) => engine,
+        Ok(engine) => {
+            let _ = events.send(Event::Loaded(Ok(())));
+            Some(engine)
+        }
         Err(error) => {
-            events
-                .send(Event::Loaded(Err(error)))
-                .map_err(|_| anyhow::anyhow!("service stopped"))?;
-            return Ok(());
+            let _ = events.send(Event::Loaded(Err(error)));
+            None
         }
     };
-    events
-        .send(Event::Loaded(Ok(())))
-        .map_err(|_| anyhow::anyhow!("service stopped"))?;
+    let mut engine = load();
     for work in receiver {
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
         match work {
+            Work::SetupModel => {
+                let result = config.model_dir().and_then(|path| {
+                    model_download::download(&path, &shutdown, |stage| {
+                        let _ = events.send(Event::ModelProgress(stage));
+                    })
+                });
+                match result {
+                    Ok(()) if !shutdown.load(Ordering::Relaxed) => {
+                        let _ = events.send(Event::ModelProgress(ModelSetup::Loading));
+                        engine = load();
+                    }
+                    Err(error) => {
+                        let _ = events.send(Event::ModelDownloadFailed(error));
+                    }
+                    _ => break,
+                }
+            }
             Work::Transcribe(id, recording) => {
                 if current.load(Ordering::Acquire) != id {
                     continue;
                 }
-                let result = engine.transcribe(&recording.path);
+                let result = engine
+                    .as_mut()
+                    .context("Speech model is not ready")
+                    .and_then(|engine| engine.transcribe(&recording.path));
                 // Recording is deleted before notifying the main service.
                 drop(recording);
                 events
@@ -670,8 +745,16 @@ pub fn run(config: Config) -> Result<()> {
     let worker_config = config.clone();
     let worker_events = events.clone();
     let current = current_generation.clone();
-    let inference =
-        thread::spawn(move || inference_worker(&worker_config, worker_events, current, work));
+    let worker_shutdown = shutdown.clone();
+    let inference = thread::spawn(move || {
+        inference_worker(
+            &worker_config,
+            worker_events,
+            current,
+            work,
+            worker_shutdown,
+        )
+    });
     let listener_events = events.clone();
     let listener_shutdown = shutdown.clone();
     let server =
