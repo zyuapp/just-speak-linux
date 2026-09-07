@@ -86,9 +86,17 @@ On Omarchy, run `omarchy-shell shell rescanPlugins` after restoring the release.
 
 ## Producing a release
 
-The workflow in `.github/workflows/release.yml` runs for manual dispatch and `v*` tags. It has read-only repository permissions and produces [GitHub Actions artifacts](https://docs.github.com/en/actions/tutorials/store-and-share-data); it does not publish a release automatically.
+The workflow in `.github/workflows/release.yml` runs for manual dispatch and `v*` tags. It retains build artifacts and publishes tagged releases only after all checks pass. Manual dispatch builds do not publish a release.
 
 The workflow builds on Ubuntu 22.04 with Rust 1.88, checks the `GLIBC_2.35` and `GLIBCXX_3.4.30` ABI ceiling, runs Rust tests and Clippy, and exercises both the model test and release executable against the official model's speech fixture. The native runtime is built with TTS disabled. The package creator scans the final binary for eSpeak/Piper symbols, includes native and Rust license texts, and packages source from the exact clean commit.
+
+Before publication, `scripts/test-ota-compatibility.py` verifies that the published
+v0.2.3 updater accepts and installs the exact incoming archive. Downloads and
+service commands are simulated in an isolated prefix; archive validation,
+checksums, installation and rollback-pointer checks use the actual executables.
+Keep release payloads compatible with old validators so users can skip versions.
+In particular, launcher artwork is embedded in the binary starting in v0.2.6;
+the standalone SVG entry in v0.2.5 prevented earlier clients from upgrading.
 
 Locally:
 

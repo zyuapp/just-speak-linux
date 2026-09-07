@@ -46,7 +46,9 @@ with tempfile.TemporaryDirectory(prefix='just-speak-release-') as temporary:
         shutil.copyfile(source, destination)
     copy(binary, 'bin/just-speak')
     for source in sorted((project / 'ui').iterdir()):
-        if source.is_file() and (source.suffix == '.qml' or source.name in ('manifest.json', 'just-speak.svg')):
+        # Keep the payload readable by existing OTA clients (v0.2.0–v0.2.4).
+        # The launcher SVG is embedded in the executable, not an archive entry.
+        if source.is_file() and (source.suffix == '.qml' or source.name == 'manifest.json'):
             copy(source, 'share/just-speak/ui/' + source.name)
     for source in sorted((project / 'gtk').iterdir()):
         if source.is_file() and source.suffix in ('.js', '.css', '.json'):

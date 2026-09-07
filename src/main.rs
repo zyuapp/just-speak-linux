@@ -2,6 +2,7 @@ mod audio;
 mod config;
 mod daemon;
 mod desktop;
+mod desktop_assets;
 mod feedback;
 mod history;
 mod inference;
@@ -42,6 +43,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Print the embedded launcher icon for installation.
+    #[command(hide = true)]
+    ExportIcon,
     /// Run the resident model and recording service in the foreground.
     Daemon,
     /// Start recording (safe to call repeatedly while the key is held).
@@ -193,6 +197,10 @@ fn main() -> ExitCode {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
+    if matches!(cli.command, Commands::ExportIcon) {
+        io::stdout().lock().write_all(desktop_assets::ICON)?;
+        return Ok(());
+    }
     // Control an already-running service even if settings were edited into an
     // invalid state. In particular, Escape must always be able to cancel.
     if let Some(result) = control_command(&cli.command) {
@@ -211,7 +219,12 @@ fn run() -> Result<()> {
     }
     config.validate()?;
     match cli.command {
-        Commands::Daemon => daemon::run(config),
+        Commands::Daemon => {
+            if let Err(error) = desktop_assets::refresh() {
+                eprintln!("just-speak: could not refresh launcher icon: {error:#}");
+            }
+            daemon::run(config)
+        }
         Commands::Doctor => doctor(&config),
         Commands::Update { command } => match command {
             UpdateCommand::RefreshUi => ui_refresh::refresh().map(|_| ()),
@@ -345,6 +358,9 @@ fn control_command(command: &Commands) -> Option<Result<()>> {
 
 fn open_window(record_shortcut: bool) -> Result<()> {
     use std::os::unix::process::CommandExt;
+    if let Err(error) = desktop_assets::refresh() {
+        eprintln!("just-speak: could not refresh launcher icon: {error:#}");
+    }
     let exe = env::current_exe()?;
     let prefix = env::var_os("JUST_SPEAK_PREFIX")
         .map(PathBuf::from)

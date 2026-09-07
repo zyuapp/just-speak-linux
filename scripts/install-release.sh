@@ -217,7 +217,7 @@ fi
 installed=1
 payload=$prefix/share/just-speak/updates/current
 python3 - "$prefix" "$config_dir" "$data_dir" "$payload" <<'PY'
-import os, pathlib, sys, tempfile
+import os, pathlib, subprocess, sys, tempfile
 prefix, config, data, payload = map(pathlib.Path, sys.argv[1:])
 def write(path, text, mode=0o644):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -246,15 +246,16 @@ def desktop_quote(text):
     return '"' + str(text).replace('\\', '\\\\\\\\').replace('"', '\\\\"').replace('`', '\\\\`').replace('$', '\\\\$').replace('%', '%%') + '"'
 desktop = '\n'.join('Exec=' + desktop_quote(prefix / 'bin/just-speak') + ' window' if line.startswith('Exec=') else line for line in desktop.splitlines()) + '\n'
 write(data / 'applications/just-speak.desktop', desktop)
-# Keep the icon pointed at the active release, including after later app updates.
+# New releases embed artwork to remain compatible with older OTA validators.
+# Retain support for explicitly installing older releases with this script.
 icon_source = prefix / 'share/just-speak/ui/just-speak.svg'
 if icon_source.is_file():
-    icon = data / 'icons/hicolor/scalable/apps/just-speak.svg'
-    icon.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=icon.parent) as temporary:
-        link = pathlib.Path(temporary) / 'icon'
-        link.symlink_to(icon_source)
-        os.replace(link, icon)
+    write(data / 'icons/hicolor/scalable/apps/just-speak.svg', icon_source.read_text())
+else:
+    version = subprocess.check_output([str(prefix / 'bin/just-speak'), '--version'], text=True).strip().split()[-1]
+    if tuple(map(int, version.split('.'))) >= (0, 2, 6):
+        artwork = subprocess.check_output([str(prefix / 'bin/just-speak'), 'export-icon'], text=True)
+        write(data / 'icons/hicolor/scalable/apps/just-speak.svg', artwork)
 PY
 if (( download_model )); then
     "$prefix/bin/just-speak" model download
